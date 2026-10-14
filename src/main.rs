@@ -1,6 +1,7 @@
 mod afk;
 mod always_react;
 mod automod;
+mod availability;
 mod cards;
 mod commands;
 mod community;
@@ -42,6 +43,7 @@ struct Data {
     music: Option<Arc<music::Service>>,
     afk: Arc<afk::Service>,
     live_status: Arc<live_status::Service>,
+    availability: Arc<availability::Service>,
 }
 
 async fn reply(ctx: Context<'_>, text: impl Into<String>) -> Result<(), Error> {
@@ -124,11 +126,34 @@ async fn main() -> Result<(), Error> {
                 .unwrap_or_else(|_| "elvnx_bot=info,warn".into()),
         )
         .init();
+    if std::env::args().any(|a| a == "--version") {
+        println!(
+            "ELVNX v{} / build {} / developed and maintained by avrxt.dev",
+            env!("CARGO_PKG_VERSION"),
+            env!("ELVNX_BUILD_NUMBER")
+        );
+        return Ok(());
+    }
     std::fs::create_dir_all("data")?;
     let url = std::env::var("DATABASE_URL").unwrap_or_else(|_| "sqlite://data/elvnx.db".into());
     let db = store::connect(&url).await?;
     if std::env::args().any(|a| a == "--preview") {
         std::fs::create_dir_all("previews")?;
+        std::fs::write(
+            "previews/availability.png",
+            cards::render(
+                "WHO'S AROUND?",
+                "ELVNX-PVT",
+                "Online • Offline • Gaming • On VC",
+                &[
+                    ("ONLINE", "12".into()),
+                    ("OFFLINE", "8".into()),
+                    ("GAMING", "4".into()),
+                    ("ON VC", "6".into()),
+                ],
+                None,
+            )?,
+        )?;
         std::fs::write(
             "previews/birthday.png",
             cards::render(
@@ -232,6 +257,9 @@ async fn main() -> Result<(), Error> {
     if std::env::var("ENABLE_MEMBER_EVENTS").as_deref() == Ok("true") {
         intents |= serenity::GatewayIntents::GUILD_MEMBERS;
     }
+    if std::env::var("ENABLE_PRESENCE_EVENTS").as_deref() == Ok("true") {
+        intents |= serenity::GatewayIntents::GUILD_PRESENCES;
+    }
     let framework=poise::Framework::builder().options(poise::FrameworkOptions {
         commands: commands::all(),
         pre_command: |ctx| Box::pin(async move {
@@ -255,13 +283,16 @@ async fn main() -> Result<(), Error> {
     }).setup(move|ctx,ready,framework|Box::pin(async move {
         if std::env::var("REGISTER_COMMANDS").as_deref()==Ok("true") {
             poise::builtins::register_in_guild(ctx,&framework.options().commands,guild).await?;
+            // This bot is guild-only; remove obsolete global registrations from earlier versions.
+            serenity::Command::set_global_commands(ctx,Vec::new()).await?;
         }
         tracing::info!(bot=%ready.user.name,guild=%guild,commands=music::COMMAND_COUNT,"ELVNX connected");
         let music=music::Service::start(ctx.clone(),db.clone(),guild,ready.user.id)?;
         let afk = afk::Service::start(ctx.clone(), db.clone(), guild, settings.afk_move_channel);
         let started = std::time::Instant::now();
         let live_status = live_status::Service::start(ctx.clone(), db.clone(), guild, Arc::clone(framework.shard_manager()), music.clone(), started).await?;
-        let data=Data {db,guild,settings:RwLock::new(settings),configuration_lock:Mutex::new(()),spam:Mutex::new(HashMap::new()),started,stickies,voices:Arc::new(Mutex::new(HashMap::new())),nuke:Mutex::new(HashMap::new()),rules:RwLock::new(automod::Rules::load()?),event_history:Mutex::new(eventlog::Cache::default()),music,afk,live_status};
+        let availability=availability::Service::start(ctx.clone(),db.clone(),guild).await?;
+        let data=Data {db,guild,settings:RwLock::new(settings),configuration_lock:Mutex::new(()),spam:Mutex::new(HashMap::new()),started,stickies,voices:Arc::new(Mutex::new(HashMap::new())),nuke:Mutex::new(HashMap::new()),rules:RwLock::new(automod::Rules::load()?),event_history:Mutex::new(eventlog::Cache::default()),music,afk,live_status,availability};
         extras::presence(ctx,&*data.settings.read().await);
         extras::start_scheduler(ctx.http.clone(),data.db.clone(),guild,data.voices.clone());
         features::start(ctx.clone(),data.db.clone(),guild);

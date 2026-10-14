@@ -12,7 +12,7 @@ All commands are scoped to ELVNX-PVT. Replies containing settings, report receip
 | `/remind text when channel` | Personal DM reminder, or staff channel reminder | Channel delivery requires Manage Server |
 | `/reminders`, `/reminder-cancel id` | List/cancel your own reminders | Member |
 | `/report` | Confidential modal with details, optional member ID and message link | Member |
-| `/report-setup channel enabled` | Select a strictly private staff report channel | Manage Server |
+| `/setup-report channel enabled` | Select a strictly private staff report channel | Manage Server |
 | `/config-backup` | Download settings JSON and save a local snapshot | Manage Server |
 | `/config-import file` | Validate and preview an exported JSON attachment | Manage Server + Manage Roles |
 | `/config-restore id confirm` | Preview first, then explicitly apply a reviewed snapshot | Manage Server + Manage Roles |
@@ -29,7 +29,7 @@ All commands are scoped to ELVNX-PVT. Replies containing settings, report receip
 
 Start with `/settings-panel`. For role panels, first approve each genuinely public role using `/selfrole_allow`, then run `/role-panel`. Do not approve roles that grant private category access. Buttons recheck the allowlist, current permissions, and bot hierarchy on every click; revoking approval disables old grants.
 
-Reports require a text channel with an explicit everyone View Channel deny and only staff access grants. A separate staff-only channel is appropriate: the existing read-only log role is not a staff role and must not receive confidential reports. Both configuration and delivery recheck privacy. Reports include a receipt ID, reporter, selected member, details, and source link in one private embed. They never automatically punish members. Report details stay in Discord; SQLite stores only delivery metadata. Maximum three submissions per member per 24 hours. There is no automatic resend after an ambiguous delivery failure.
+With no channel selected, `/setup-report` creates or reuses a private `member-reports` channel for administrators and moderators. Creation requires the caller and bot to have Manage Channels. Selecting an existing channel preserves its permissions and rejects non-staff access with an actionable explanation. Reports require a text channel with an explicit everyone View Channel deny and only staff access grants. A separate staff-only channel is appropriate: the existing read-only log role is not a staff role and must not receive confidential reports. Both configuration and delivery recheck privacy. Reports include a receipt ID, reporter, selected member, details, and source link in one private embed. They never automatically punish members. Report details stay in Discord; SQLite stores only delivery metadata. Maximum three submissions per member per 24 hours. There is no automatic resend after an ambiguous delivery failure.
 
 Birthday announcements are opt-in, at 08:00 IST within a five-minute online window. No birth year is collected. February 29 is observed on February 28 in non-leap years. Cards use Discord avatars and bundled Space Grotesk, IBM Plex Mono, and Kalam fonts with black/white doodles. Removing the opt-in stops future jobs; earlier Discord posts remain. Calendar jobs do not backfill missed birthday announcements.
 

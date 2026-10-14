@@ -5,8 +5,8 @@ pub fn all() -> Vec<poise::Command<crate::Data, Error>> {
     let mut commands = vec![
         help(),
         ping(),
+        version(),
         userinfo(),
-        serverinfo(),
         warn(),
         warnings(),
         delwarn(),
@@ -45,6 +45,7 @@ pub fn all() -> Vec<poise::Command<crate::Data, Error>> {
     commands.push(crate::legacy::appukuttan_legacy());
     commands.push(crate::rules::rules());
     commands.push(crate::live_status::bot_status_live());
+    commands.push(crate::availability::availibilty_panel());
     commands
 }
 
@@ -59,6 +60,10 @@ mod tests {
         let names: std::collections::HashSet<_> =
             commands.iter().map(|c| c.name.as_ref()).collect();
         assert_eq!(names.len(), commands.len());
+        assert!(names.contains("setup-report"));
+        for obsolete in ["report-setup", "serverinfo", "numer-game"] {
+            assert!(!names.contains(obsolete));
+        }
         for name in [
             "say",
             "dm",
@@ -115,6 +120,28 @@ async fn help(
         .join("\n");
     reply(ctx,format!("**ALL {} COMMANDS**\n{names}\n\n**DETAILS / PAGE {page}**\n{descriptions}\n\nUse /help page:2 for the next descriptions. Required permissions apply at execution.",commands.len())).await
 }
+/// Show the installed bot version, build number, recent fixes, and developer credit.
+#[poise::command(slash_command, guild_only)]
+async fn version(ctx: Context<'_>) -> Result<(), Error> {
+    ctx.send(
+        poise::CreateReply::default()
+            .embed(version_embed())
+            .ephemeral(true)
+            .allowed_mentions(s::CreateAllowedMentions::new()),
+    )
+    .await?;
+    Ok(())
+}
+fn version_embed() -> s::CreateEmbed {
+    s::CreateEmbed::new().title("ELVNX / VERSION").color(0x111111)
+        .description("avior's Core · Rust Discord bot")
+        .field("Version",format!("v{}",env!("CARGO_PKG_VERSION")),true)
+        .field("Build number",env!("ELVNX_BUILD_NUMBER"),true)
+        .field("Built",format!("<t:{}:F>",env!("ELVNX_BUILD_NUMBER")),false)
+        .field("Recent updates & fixes","Single-message availability panel and doodle cover\nPrivate report setup and clear permission errors\nDuplicate command cleanup\nReliable presence synchronization",false)
+        .field("Developer","[avrxt.dev](https://www.avrxt.dev)",false)
+        .footer(s::CreateEmbedFooter::new("Developed and maintained by avrxt.dev • ELVNX / 11X"))
+}
 /// Bot uptime and readiness.
 #[poise::command(slash_command, guild_only)]
 async fn ping(ctx: Context<'_>) -> Result<(), Error> {
@@ -142,22 +169,6 @@ async fn userinfo(
             member.user.created_at(),
             member.joined_at.map(|t| t.to_string()).unwrap_or_default(),
             member.roles.len()
-        ),
-    )
-    .await
-}
-/// Server information.
-#[poise::command(slash_command, guild_only)]
-async fn serverinfo(ctx: Context<'_>) -> Result<(), Error> {
-    let g = ctx.data().guild.to_partial_guild(ctx.http()).await?;
-    reply(
-        ctx,
-        format!(
-            "{}\nID: {}\nOwner: {}\nRoles: {}",
-            g.name,
-            g.id,
-            g.owner_id,
-            g.roles.len()
         ),
     )
     .await

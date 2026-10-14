@@ -6,16 +6,16 @@ A standalone Rust moderation and music bot for ELVNX-PVT, using Poise/Serenity, 
 
 | Area | Commands |
 | --- | --- |
-| Information | `/help`, `/ping`, `/userinfo`, `/serverinfo`, `/server-info`, `/avrxt-dev`, `/email` |
+| Information | `/help`, `/ping`, `/version`, `/userinfo`, `/server-info`, `/avrxt-dev`, `/email` |
 | Moderation | `/warn`, `/warnings`, `/delwarn`, `/case`, `/timeout`, `/untimeout`, `/kick`, `/ban`, `/unban`, `/purge` |
 | Channel administration | `/slowmode`, `/lock`, `/unlock`, `/channel-management`, `/server-lockdown`, `/log` |
 | Roles | `/role_add`, `/role_remove`, `/selfrole_allow`, `/selfrole_remove`, `/selfrole` |
 | Setup | `/configure`, `/automod` |
 | Support | `/ticket`, `/ticket_close` |
 | Messaging | `/say`, `/dm`, `/dm-clear`, `/sticky`, `/sticky_remove` |
-| Community | `/number-game`, `/numer-game`, `/count-toggle`, `/join-to-create`, `/afk-move`, `/always-react`, `/appukuttan-legacy` |
+| Community | `/number-game`, `/count-toggle`, `/join-to-create`, `/afk-move`, `/always-react`, `/appukuttan-legacy` |
 | Server owner | `/bot-restart` |
-| Presence | `/status`, `/bot-status`, `/uptime` |
+| Presence | `/status`, `/bot-status`, `/uptime`, `/availibilty-panel` |
 | Quotes | `/quote`, `/quote-daily`, `/daily-insight` |
 | Membership | `/verify`, `/welcome-setup`, `/rolelist`, `/member-list`, `/bot-list` |
 | Activity | `/activity`, `/insight` |

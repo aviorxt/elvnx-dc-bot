@@ -19,6 +19,7 @@ $guild='1554095197959491595'
 Write-Host 'Preparing private environment. Discord checks run from the VPS.'
 $memberEvents=if ($values['ENABLE_MEMBER_EVENTS'] -eq 'true') {'true'}else{'false'}
 $contentEvents=if ($values['ENABLE_MESSAGE_CONTENT'] -eq 'true') {'true'}else{'false'}
+$presenceEvents=if ($values['ENABLE_PRESENCE_EVENTS'] -eq 'true') {'true'}else{'false'}
 $environment=@(
     "DISCORD_TOKEN=$token",
     "DISCORD_GUILD_ID=$guild",
@@ -27,13 +28,14 @@ $environment=@(
     'REGISTER_COMMANDS=true',
     "ENABLE_MEMBER_EVENTS=$memberEvents",
     "ENABLE_MESSAGE_CONTENT=$contentEvents",
+    "ENABLE_PRESENCE_EVENTS=$presenceEvents",
     'RUST_LOG=elvnx_bot=info,warn'
 ) -join "`n"
 $temporary=Join-Path $env:TEMP ("elvnx-"+[guid]::NewGuid().ToString()+'.env')
 $destination="$SshUser@$ServerAddress"
 try {
     [IO.File]::WriteAllText($temporary,$environment+"`n",[Text.UTF8Encoding]::new($false))
-    & ssh -i $KeyPath -o BatchMode=yes $destination 'umask 077; mkdir -p /home/ubuntu/.elvnx-deploy; chmod 930 /home/ubuntu/.elvnx-deploy'
+    & ssh -i $KeyPath -o BatchMode=yes $destination 'umask 077; mkdir -p /home/ubuntu/.elvnx-deploy; chmod 720 /home/ubuntu/.elvnx-deploy'
     if ($LASTEXITCODE -ne 0) {throw 'Could not create private deployment directory'}
     & scp -i $KeyPath $temporary "${destination}:/home/ubuntu/.elvnx-deploy/bot.env"
     if ($LASTEXITCODE -ne 0) {throw 'Encrypted environment transfer failed'}

@@ -172,7 +172,12 @@ async fn private_reports(
                     role.permissions.intersects(staff)
                         || (role.managed && role.tags.bot_id == Some(bot))
                 }) {
-                    return Err("Report channel grants access to a non-staff role".into());
+                    let name = partial
+                        .roles
+                        .get(&id)
+                        .map(|r| r.name.as_str())
+                        .unwrap_or("unknown role");
+                    return Err(format!("This channel allows the non-staff role **{name}** to view reports. Use /setup-report without a channel to create a private staff destination, or select a channel restricted to administrators and moderators.").into());
                 }
             }
             s::PermissionOverwriteType::Member(id) if id != bot && id != partial.owner_id => {
@@ -838,7 +843,7 @@ struct ReportForm {
 async fn report(ctx: Context<'_>) -> Result<(), Error> {
     use poise::Modal;
     let Some(channel) = ctx.data().settings.read().await.report_channel else {
-        return reply(ctx,"Private reports are not configured. A staff member can use /report-setup with a private staff channel.").await;
+        return reply(ctx,"Private reports are not configured. A staff member can use /setup-report to create a private staff channel.").await;
     };
     let app = match ctx {
         poise::Context::Application(app) => app,
@@ -924,7 +929,7 @@ async fn report(ctx: Context<'_>) -> Result<(), Error> {
 #[poise::command(
     slash_command,
     guild_only,
-    rename = "report-setup",
+    rename = "setup-report",
     required_permissions = "MANAGE_GUILD",
     default_member_permissions = "MANAGE_GUILD"
 )]
@@ -933,11 +938,13 @@ async fn report_setup(
     #[description = "Private staff text channel"] channel: Option<s::GuildChannel>,
     #[description = "Enable (default) or disable"] enabled: Option<bool>,
 ) -> Result<(), Error> {
+    let outcome:Result<String,Error>=async {
     let channel = if enabled.unwrap_or(true) {
-        Some(channel.ok_or("Select a private staff channel")?.id)
-    } else {
-        None
-    };
+        Some(match channel {
+            Some(channel)=>channel.id,
+            None=>report_destination(ctx).await?,
+        })
+    } else { None };
     setting(
         ctx.serenity_context(),
         ctx.data(),
@@ -947,11 +954,119 @@ async fn report_setup(
         channel.is_none(),
     )
     .await?;
-    reply(
-        ctx,
-        "Private report destination updated. Reports are disabled when no destination is selected.",
+    Ok(channel.map(|id|format!("Reports enabled. Private destination: <#{id}>. Members can submit /report; receipt and details are delivered here.")).unwrap_or_else(||"Private reports disabled.".into()))
+    }.await;
+    match outcome {
+        Ok(text) => reply(ctx, text).await,
+        Err(error) => {
+            reply(
+                ctx,
+                format!("**Report setup could not be completed**\n{error}"),
+            )
+            .await
+        }
+    }
+}
+fn report_overwrites<'a>(
+    guild: s::GuildId,
+    roles: impl Iterator<Item = &'a s::Role>,
+    bot: s::UserId,
+) -> Vec<s::PermissionOverwrite> {
+    let view = s::Permissions::VIEW_CHANNEL
+        | s::Permissions::SEND_MESSAGES
+        | s::Permissions::READ_MESSAGE_HISTORY
+        | s::Permissions::EMBED_LINKS
+        | s::Permissions::ATTACH_FILES;
+    let staff = s::Permissions::ADMINISTRATOR
+        | s::Permissions::MANAGE_GUILD
+        | s::Permissions::MODERATE_MEMBERS
+        | s::Permissions::MANAGE_MESSAGES;
+    let mut overwrites = vec![
+        s::PermissionOverwrite {
+            kind: s::PermissionOverwriteType::Role(s::RoleId::new(guild.get())),
+            allow: s::Permissions::empty(),
+            deny: s::Permissions::VIEW_CHANNEL,
+        },
+        s::PermissionOverwrite {
+            kind: s::PermissionOverwriteType::Member(bot),
+            allow: view,
+            deny: s::Permissions::empty(),
+        },
+    ];
+    for role in
+        roles.filter(|r| r.id.get() != guild.get() && !r.managed && r.permissions.intersects(staff))
+    {
+        overwrites.push(s::PermissionOverwrite {
+            kind: s::PermissionOverwriteType::Role(role.id),
+            allow: view,
+            deny: s::Permissions::empty(),
+        });
+    }
+    overwrites
+}
+async fn report_destination(ctx: Context<'_>) -> Result<s::ChannelId, Error> {
+    let _guard = ctx.data().configuration_lock.lock().await;
+    if let Some(id) = ctx.data().settings.read().await.report_channel {
+        let channel = s::ChannelId::new(id)
+            .to_channel(ctx.http())
+            .await?
+            .guild()
+            .ok_or("Configured report channel is unavailable")?;
+        private_reports(ctx.serenity_context(), ctx.data().guild, &channel).await?;
+        return Ok(channel.id);
+    }
+    let (guild, _) = member_permissions(
+        ctx.serenity_context(),
+        ctx.data(),
+        ctx.author().id,
+        s::Permissions::MANAGE_GUILD | s::Permissions::MANAGE_CHANNELS,
     )
-    .await
+    .await?;
+    let bot = ctx
+        .data()
+        .guild
+        .member(ctx.http(), crate::bot_id(ctx))
+        .await?;
+    if !guild
+        .member_permissions(&bot)
+        .contains(s::Permissions::MANAGE_CHANNELS)
+    {
+        return Err("The bot needs Manage Channels to create member-reports".into());
+    }
+    for channel in guild
+        .id
+        .channels(ctx.http())
+        .await?
+        .values()
+        .filter(|c| c.kind == s::ChannelType::Text && c.name == "member-reports")
+    {
+        if private_reports(ctx.serenity_context(), guild.id, channel)
+            .await
+            .is_ok()
+        {
+            return Ok(channel.id);
+        }
+    }
+    let channel = guild
+        .id
+        .create_channel(
+            ctx.http(),
+            s::CreateChannel::new("member-reports")
+                .kind(s::ChannelType::Text)
+                .topic("Confidential member reports • administrators and moderators only")
+                .permissions(report_overwrites(
+                    guild.id,
+                    guild.roles.values(),
+                    bot.user.id,
+                )),
+        )
+        .await?;
+    // Persist inside the creation lock so two simultaneous setup calls reuse one destination.
+    let mut cfg = ctx.data().settings.read().await.clone();
+    cfg.report_channel = Some(channel.id.get());
+    store::save(&ctx.data().db, guild.id.get(), &cfg).await?;
+    *ctx.data().settings.write().await = cfg;
+    Ok(channel.id)
 }
 
 #[derive(Serialize, Deserialize)]
@@ -1725,6 +1840,39 @@ async fn cleanup(db: &SqlitePool) -> Result<(), Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn generated_report_channel_grants_only_staff_and_the_bot() {
+        let mut admin = s::Role::default();
+        admin.id = s::RoleId::new(2);
+        admin.permissions = s::Permissions::ADMINISTRATOR;
+        let mut moderator = s::Role::default();
+        moderator.id = s::RoleId::new(3);
+        moderator.permissions = s::Permissions::MODERATE_MEMBERS;
+        let mut reader = s::Role::default();
+        reader.id = s::RoleId::new(4);
+        reader.permissions = s::Permissions::VIEW_CHANNEL | s::Permissions::READ_MESSAGE_HISTORY;
+        let roles = [admin, moderator, reader];
+        let overwrites = report_overwrites(s::GuildId::new(1), roles.iter(), s::UserId::new(5));
+        assert!(overwrites.iter().any(|o| o.kind
+            == s::PermissionOverwriteType::Role(s::RoleId::new(1))
+            && o.deny.contains(s::Permissions::VIEW_CHANNEL)
+            && o.allow.is_empty()));
+        for id in [2, 3] {
+            assert!(overwrites.iter().any(|o| o.kind
+                == s::PermissionOverwriteType::Role(s::RoleId::new(id))
+                && o.allow.contains(s::Permissions::VIEW_CHANNEL)));
+        }
+        assert!(
+            !overwrites
+                .iter()
+                .any(|o| o.kind == s::PermissionOverwriteType::Role(s::RoleId::new(4)))
+        );
+        assert!(overwrites.iter().any(|o| {
+            o.kind == s::PermissionOverwriteType::Member(s::UserId::new(5))
+                && o.allow
+                    .contains(s::Permissions::SEND_MESSAGES | s::Permissions::EMBED_LINKS)
+        }));
+    }
     #[tokio::test]
     async fn failed_closed_polls_cannot_starve_active_polls_or_later_results() {
         let db = store::connect("sqlite::memory:").await.unwrap();

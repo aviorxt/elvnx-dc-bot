@@ -49,6 +49,7 @@ pub async fn connect(url: &str) -> Result<SqlitePool, sqlx::Error> {
     sqlx::raw_sql(
         "CREATE TABLE IF NOT EXISTS settings(guild TEXT PRIMARY KEY, value TEXT NOT NULL);
          CREATE TABLE IF NOT EXISTS live_status(guild TEXT PRIMARY KEY, value TEXT NOT NULL);
+         CREATE TABLE IF NOT EXISTS availability(guild TEXT PRIMARY KEY, value TEXT NOT NULL);
          CREATE TABLE IF NOT EXISTS role_panels(id INTEGER PRIMARY KEY AUTOINCREMENT,guild TEXT NOT NULL,channel TEXT NOT NULL,message TEXT,roles TEXT NOT NULL);
          CREATE TABLE IF NOT EXISTS polls(id INTEGER PRIMARY KEY AUTOINCREMENT,guild TEXT NOT NULL,owner TEXT NOT NULL,channel TEXT NOT NULL,message TEXT,question TEXT NOT NULL,options TEXT NOT NULL,due INTEGER NOT NULL,state TEXT NOT NULL DEFAULT 'open',rendered INTEGER NOT NULL DEFAULT 0);
          CREATE TABLE IF NOT EXISTS poll_votes(poll INTEGER NOT NULL,user TEXT NOT NULL,choice INTEGER NOT NULL,PRIMARY KEY(poll,user));

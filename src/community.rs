@@ -6,7 +6,6 @@ pub fn all() -> Vec<poise::Command<Data, Error>> {
         dm_clear(),
         channel_management(),
         number_game(),
-        numer_game(),
         count_toggle(),
         server_lockdown(),
         server_info(),
@@ -209,22 +208,6 @@ async fn setup_number(
     default_member_permissions = "MANAGE_GUILD"
 )]
 async fn number_game(
-    ctx: Context<'_>,
-    #[description = "Enabled"] enabled: bool,
-    #[description = "Counting channel"] channel: Option<s::GuildChannel>,
-) -> Result<(), Error> {
-    setup_number(ctx, enabled, channel).await
-}
-/// Alias for /number-game.
-#[poise::command(
-    slash_command,
-    guild_only,
-    rename = "numer-game",
-    required_permissions = "MANAGE_GUILD",
-    required_bot_permissions = "MANAGE_MESSAGES",
-    default_member_permissions = "MANAGE_GUILD"
-)]
-async fn numer_game(
     ctx: Context<'_>,
     #[description = "Enabled"] enabled: bool,
     #[description = "Counting channel"] channel: Option<s::GuildChannel>,

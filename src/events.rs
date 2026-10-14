@@ -40,6 +40,7 @@ pub async fn handle(
     data: &Data,
 ) -> Result<(), Error> {
     let bot_id = ctx.cache.current_user().id;
+    data.availability.observe(event).await;
     if let s::FullEvent::ShardStageUpdate { event } = event {
         data.afk
             .connection(event.new == s::ConnectionStage::Connected)
