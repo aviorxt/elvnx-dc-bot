@@ -12,7 +12,7 @@ use std::{
 use tokio::sync::{Mutex, Notify};
 use tokio_tungstenite::tungstenite::{Message, client::IntoClientRequest};
 
-pub const COMMAND_COUNT: usize = 93;
+pub const COMMAND_COUNT: usize = 100;
 const MAX_QUEUE: usize = 50;
 #[derive(Clone, Copy, Default, poise::ChoiceParameter, PartialEq, Debug)]
 enum RepeatMode {
@@ -200,7 +200,7 @@ impl Service {
         });
         Ok(Some(service))
     }
-    async fn request(
+    pub(crate) async fn request(
         &self,
         method: reqwest::Method,
         path: &str,

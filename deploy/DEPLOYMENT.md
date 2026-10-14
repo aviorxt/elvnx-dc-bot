@@ -4,7 +4,7 @@ VPS: `13.203.104.97` / SSH user `ubuntu` / Ubuntu 26.04 LTS, x86-64.
 
 Installed an optimized Linux executable and the `elvnx-bot` systemd service.
 The service is enabled for reboot, runs as `elvnx`, and is active. It connected
-as **avior's Core** (bot ID `1474265288223621215`) in ELVNX-PVT, with all 93 guild
+as **avior's Core** (bot ID `1474265288223621215`) in ELVNX-PVT, with all 100 guild
 commands registered. Discord Member and Message Content intents were already
 authorized in this application's flags and are enabled in the VPS environment.
 No external interactions endpoint is configured, so commands use the gateway.
@@ -12,7 +12,7 @@ Automatic registration is disabled after successful initial registration.
 
 Validated:
 
-- 35 unit tests passed on Windows and the VPS, including poll vote closing/fair scheduling, once-only job claims, restore/playlist ownership, repeat behavior, and the existing moderation checks.
+- 40 unit tests passed on Windows and the VPS, including poll vote closing/fair scheduling, once-only job claims, restore/playlist ownership, repeat behavior, and the existing moderation checks.
 - Strict Clippy and formatting checks passed on the VPS.
 - Optimized Linux build passed using locked dependencies.
 - Database schema initialization passed as the service user.
@@ -22,7 +22,7 @@ Validated:
 - Font license files installed alongside the executable.
 
 Binary SHA-256:
-`c4648fc1db8061f22b47986b3b27c06fcd9d4e48290506c51445bf3e29cf7e56`.
+`ad1d94bb26b497f902f54a8664db9507e426404a0474447d46534974b5e7d1ef`.
 
 The service state directory is private to `elvnx`. No Discord token or SSH private
 key was copied into source control or the source archive. Git was not committed
@@ -30,7 +30,7 @@ or pushed. The existing website was not deployed or changed.
 
 Token rotation: update the ignored local `.env` and run `deploy/start.ps1`.
 This validates membership from the VPS, installs
-the secret environment with mode 600, restarts the service, verifies 93 registered
+the secret environment with mode 600, restarts the service, verifies 100 registered
 guild commands, and disables registration on subsequent restarts. Enable Message
 Content and Server Members privileged intents in the Discord portal before
 setting the corresponding environment flags to true.
@@ -61,3 +61,13 @@ Availability release deployed: /availibilty-panel creates/reuses an overview cov
 Single-embed availability update deployed: existing overview channel and message reused; Online, Offline, Gaming, and On VC now share four bounded embed fields plus the doodle cover. Compact non-pinging member references preserve space; overflow is shown within Discord's field limits. Four obsolete empty bot-generated status channels removed after their tracked messages were cleaned; custom content is preserved by the migration checks. Discord API verifies exactly one category child (availability-panel), one tracked message, one embed, four status fields, and a cover image. Retired migration records are cleared. Observed a live voice count changing from zero to one. 35 tests, strict lint/formatting, native build, schema and PNG checks passed. 92 commands remain registered with no duplicates. Git changes remain uncommitted/unpushed.
 
 Version release deployed: /version displays package v0.1.0, build 1791990335, localized build time, recent fixes, and the avrxt.dev developer credit in an ephemeral themed embed. The installed executable's --version output matches the release metadata without initializing the database or connecting to Discord. All 93 guild commands verified, with zero globals, duplicate names, or missing features. 35 native tests, formatting, strict Clippy, optimized build, schema and PNG checks passed. Bot, Lavalink, and yt-cipher services are active; the availability roster synchronized after restart. Automatic command registration disabled after verification. Git changes remain uncommitted/unpushed.
+
+Media posting release deployed: /send-attachement accepts one image/video/audio upload and optional caption for a selected text channel. Manage Server and destination access are required; bot Attach Files is validated. Native attachments preserve previews and playback. HTTPS Discord attachment hosts only, no redirects, 45-second download timeout, 8 MiB bounded download, no SVG, sanitized filename, disabled mentions, and private errors. Files remain memory-only; audit stores destination/message IDs. 36 tests and strict format/Clippy passed locally and on VPS, along with optimized build, PNG and schema checks. Discord verifies 94 guild commands, zero globals/duplicates/missing features. Services active; build 1791993836. Changes remain uncommitted/unpushed.
+
+SVG support update deployed: /send-attachement accepts image/svg+xml and .svg filenames with missing, generic binary, or XML content types. Original files are forwarded without parsing, rendering, or executing SVG content. The existing host, size, permissions, timeout, and disabled-mention protections remain. Regression validation covers SVG acceptance and unsafe source/size rejection. All 36 tests and strict format/Clippy passed locally and on VPS; native build, PNG/schema checks passed. Services active, build 1791994264, command schema unchanged at 94. No commit or push.
+
+Attachment validation fix deployed: regular and ephemeral-attachments Discord CDN paths are accepted. Missing/generic MIME metadata uses recognized image/video/audio filename extensions (case insensitive); explicit non-media MIME values remain rejected. Errors distinguish size, source URL, and unsupported format. Regression test covers a signed ephemeral 600 KiB PNG with generic/missing MIME, uppercase extension, and executable/HTML rejection. All 36 tests, strict Clippy/formatting and native build passed. Bot/Lavalink/cipher active, build 1791994782; schema remains 94 commands. No commit or push.
+
+Community toolbox deployed: /media-panel previews up to three uploads and requires initiating-user confirmation; /schedule-post persists bounded media/text with atomic latest-payload claims, edit/cancel, current permission checks and no ambiguous replay; /event creates native RSVP events, reminders and optional permission-matched temporary rooms with empty-room cleanup; /mod-review and new report/appeal buttons implement atomic assignment and assignee-only resolution; /server-health supplies private resource cards and opt-in sustained alerts/recovery; /privacy erases and opts out of activity counters. /help search/check_command provide search and permission diagnostics within Discord's 100-command limit. Native API verifies 100 guild registrations, no globals/duplicates/missing features, file attachment options, report kind and help options. All five new database tables initialize; queue/events/opt-outs/alerts are initially empty. 39 tests, strict Clippy/formatting, optimized build, schema and PNG checks passed locally/on VPS. Event and health cover previews visually reviewed. Services active, presence roster synchronized; build 1791996143. Automatic registration disabled after verification. No Git commit/push. See TOOLBOX.md for configuration and retention.
+
+Release 0.2.0+build.20261014.165200 deployed. Public release IDs follow SemVer MAJOR.MINOR.PATCH with build.YYYYMMDD.HHMMSS UTC metadata. /version and installed --version agree; Discord build timestamp uses the separate epoch. Reproducible SOURCE_DATE_EPOCH values are supported and invalid values fail clearly. A SemVer parser/calendar regression check passes along with the other 39 tests on Windows and Linux. Strict lint/format, locked optimized build, schema and PNG checks passed. Services healthy; 100 commands verified with zero globals/duplicates/missing features. This source release and the prior media/toolbox fixes are included in the user-authorized Git commit/push.

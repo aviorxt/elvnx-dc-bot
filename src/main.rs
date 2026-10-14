@@ -17,6 +17,7 @@ mod rules;
 mod security;
 mod sticky;
 mod store;
+mod toolbox;
 
 use poise::serenity_prelude as serenity;
 use sqlx::SqlitePool;
@@ -128,8 +129,8 @@ async fn main() -> Result<(), Error> {
         .init();
     if std::env::args().any(|a| a == "--version") {
         println!(
-            "ELVNX v{} / build {} / developed and maintained by avrxt.dev",
-            env!("CARGO_PKG_VERSION"),
+            "ELVNX v{} / build {} UTC / developed and maintained by avrxt.dev",
+            env!("ELVNX_RELEASE"),
             env!("ELVNX_BUILD_NUMBER")
         );
         return Ok(());
@@ -139,6 +140,33 @@ async fn main() -> Result<(), Error> {
     let db = store::connect(&url).await?;
     if std::env::args().any(|a| a == "--preview") {
         std::fs::create_dir_all("previews")?;
+        std::fs::write(
+            "previews/event-cover.png",
+            cards::render(
+                "YOU'RE INVITED",
+                "ELVNX MOVIE NIGHT",
+                "ELVNX / community event",
+                &[
+                    ("START", "IST scheduled".into()),
+                    ("DURATION", "120 minutes".into()),
+                ],
+                None,
+            )?,
+        )?;
+        std::fs::write(
+            "previews/health.png",
+            cards::render(
+                "SYSTEM HEALTH",
+                "ELVNX / 11X",
+                "Private infrastructure snapshot",
+                &[
+                    ("GATEWAY", "42 ms".into()),
+                    ("DATABASE", "1 ms".into()),
+                    ("MEMORY", "1400 MiB available".into()),
+                ],
+                None,
+            )?,
+        )?;
         std::fs::write(
             "previews/availability.png",
             cards::render(
@@ -296,6 +324,7 @@ async fn main() -> Result<(), Error> {
         extras::presence(ctx,&*data.settings.read().await);
         extras::start_scheduler(ctx.http.clone(),data.db.clone(),guild,data.voices.clone());
         features::start(ctx.clone(),data.db.clone(),guild);
+        toolbox::start(ctx.clone(),data.db.clone(),guild,data.music.clone(),Arc::clone(framework.shard_manager()));
         Ok(data)
     })).build();
     let mut client = serenity::ClientBuilder::new(token, intents)

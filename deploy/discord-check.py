@@ -49,6 +49,12 @@ def main():
         children=[channel['name'] for channel in request('guilds/'+settings['DISCORD_GUILD_ID']+'/channels') if channel.get('parent_id')==str(cfg.get('category'))]
         print(json.dumps({'enabled':cfg.get('enabled',False),'category':cfg.get('category'),'audience':cfg.get('audience'),'boards':boards,'category_channels':children,'retired_count':len(cfg.get('retired',[]))}))
         return
+    if len(sys.argv)>1 and sys.argv[1]=='toolbox-state':
+        with sqlite3.connect('file:/var/lib/elvnx-bot/data/elvnx.db?mode=ro', uri=True) as db:
+            tables = ['activity_optout', 'review_queue', 'scheduled_posts', 'community_events', 'health_alerts']
+            counts = {table: db.execute(f'SELECT COUNT(*) FROM {table} WHERE guild=?', (settings['DISCORD_GUILD_ID'],)).fetchone()[0] for table in tables}
+        print(json.dumps({'table_counts': counts}))
+        return
     user = request('users/@me')
     if not user.get('bot'):
         raise ValueError('A dedicated bot token is required')
@@ -95,9 +101,14 @@ def main():
         names = {command['name'] for command in commands}
         expected.add('availibilty-panel')
         expected.add('version')
+        expected.add('send-attachement')
+        expected.update({'media-panel', 'schedule-post', 'event', 'mod-review', 'server-health', 'privacy'})
         playlist = next((command for command in commands if command['name'] == 'playlist'), {})
+        help_command = next((command for command in commands if command['name'] == 'help'), {})
+        help_options = [option['name'] for option in help_command.get('options', [])]
         report = next((command for command in commands if command['name'] == 'setup-report'), {})
         print(json.dumps({'command_count': len(commands), 'global_count': len(global_commands), 'duplicate_names': sorted(names & {c['name'] for c in global_commands}), 'missing_features': sorted(expected-names), 'playlist_subcommands': sorted(option['name'] for option in playlist.get('options', []) if option['type'] == 1), 'report_options': [{'name': o['name'], 'required': o.get('required', False)} for o in report.get('options', [])]}))
+        print(json.dumps({'help_options': help_options, 'new_command_options': {c['name']: [{'name': o['name'], 'type': o['type'], 'required': o.get('required', False)} for o in c.get('options', [])] for c in commands if c['name'] in {'media-panel', 'schedule-post', 'event', 'mod-review', 'server-health', 'privacy', 'report'}}}))
     else:
         guild = request('guilds/' + guild_id)
         print(json.dumps({'bot': user['username'], 'bot_id': user['id'], 'guild': guild['name'], 'guild_id': guild['id']}))

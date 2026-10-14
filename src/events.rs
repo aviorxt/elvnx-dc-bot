@@ -56,6 +56,9 @@ pub async fn handle(
     }
     crate::music::gateway(ctx, event, data).await;
     crate::eventlog::handle(ctx, event, data).await;
+    if crate::toolbox::gateway(ctx, event, data).await? {
+        return Ok(());
+    }
     if crate::features::gateway(ctx, event, data).await? {
         return Ok(());
     }

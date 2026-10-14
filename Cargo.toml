@@ -1,6 +1,6 @@
 [package]
 name = "elvnx-bot"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 
 [dependencies]
@@ -19,6 +19,12 @@ tokio-tungstenite = "0.21"
 futures-util = { version = "0.3", features = ["sink"] }
 chrono = "=0.4.45"
 rand = "=0.8.8"
+
+[build-dependencies]
+chrono = "=0.4.45"
+
+[dev-dependencies]
+semver = "=1.0.28"
 
 [profile.dev]
 debug = 0

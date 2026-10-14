@@ -1,6 +1,6 @@
 # ELVNX / 11X Discord bot
 
-A standalone Rust moderation and music bot for ELVNX-PVT, using Poise/Serenity, SQLite, and a private Lavalink node. The AVRXT website is a separate project. This version has 93 top-level slash commands. See deploy/README.md for the Ubuntu VPS setup. A dedicated Discord token and server invitation are required for live operation.
+A standalone Rust moderation and music bot for ELVNX-PVT, using Poise/Serenity, SQLite, and a private Lavalink node. The AVRXT website is a separate project. This version has 100 top-level slash commands. See deploy/README.md for the Ubuntu VPS setup. A dedicated Discord token and server invitation are required for live operation.
 
 ## Commands
 
@@ -123,3 +123,13 @@ Appukuttan Legacy: /appukuttan-legacy channel:YOUR_CHANNEL posts the exact text 
 Server rules: /rules channel:YOUR_CHANNEL posts one message with a generated 1200x420 ELVNX doodle cover followed by a detailed rules embed. The artwork includes the current server name and IST date, with Space Grotesk, IBM Plex Mono, and Kalam. Eleven sections cover respect, privacy, safety, content, channel use, spam, voice etiquette, sharing, bot tools, reports, and moderation. Manage Server and destination posting access are required; the bot also needs Embed Links and Attach Files. Messages do not ping users or roles. Each invocation creates a new rules post without pinning or replacing old messages. Preview with the executable's --preview option.
 
 Live status: /bot-status-live creates ELVNX BOT STATUS with elvnx-status and lavlink-status channels. It edits one embed per channel every 30 seconds, with saved IDs for restart recovery. Admins can pause using enabled:false. See deploy/LIVE-STATUS.md for metrics, read-only permissions, and freshness behavior.
+
+### Media posting
+
+Use /send-attachement channel:DESTINATION file:UPLOAD caption:OPTIONAL to post an image, video, or audio attachment through the bot. Manage Server is required; both the operator and bot must see/send in the destination, and the bot needs Attach Files. Uploads are limited to 8 MiB, Discord-hosted regular and temporary slash-command attachments only, including SVG files (forwarded without parsing; inline preview depends on Discord). Missing or generic MIME metadata falls back to recognized media filename extensions; explicit non-media types are rejected. Mentions are disabled. Files are downloaded with bounded size/time, forwarded as native attachments for preview/playback, and never saved to disk or SQLite. The staff audit records only the destination/message IDs. Channel permission and download failures are reported privately. The command name follows the requested spelling.
+
+### Community toolbox
+
+New tools: /media-panel, /schedule-post, /event, /mod-review, /server-health, /privacy. Reports now support an Appeal choice and persistent staff review buttons. Use /help search:WORD to find commands and /help check_command:COMMAND channel:CHANNEL for permission diagnostics. Search/diagnostics share /help to stay within Discord's 100-command limit. See deploy/TOOLBOX.md for examples, permissions, scheduling, retention and alert setup. Automatic posting and alerts require explicit setup.
+
+Release versions follow Semantic Versioning: MAJOR.MINOR.PATCH. Current feature release: 0.2.0. Public build identifiers use 0.2.0+build.YYYYMMDD.HHMMSS with a UTC calendar timestamp. /version and --version show the same compiled identifier. See deploy/VERSION.md for release numbering and reproducible builds.

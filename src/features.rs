@@ -29,7 +29,7 @@ fn now() -> i64 {
 fn ist(time: i64) -> Result<chrono::DateTime<chrono::Utc>, Error> {
     chrono::DateTime::from_timestamp(time + 19_800, 0).ok_or_else(|| "Invalid date".into())
 }
-fn due(value: &str, time: i64) -> Result<i64, Error> {
+pub(crate) fn due(value: &str, time: i64) -> Result<i64, Error> {
     let value = value.trim();
     let result = if let Some(unit) = value
         .chars()
@@ -145,7 +145,7 @@ async fn destination(
     }
     Ok(channel)
 }
-async fn private_reports(
+pub(crate) async fn private_reports(
     ctx: &s::Context,
     guild: s::GuildId,
     channel: &s::GuildChannel,
@@ -838,9 +838,17 @@ struct ReportForm {
     #[max_length = 200]
     link: Option<String>,
 }
-/// Submit a confidential staff report through a private form; no automatic punishment.
+#[derive(Clone, Copy, Debug, poise::ChoiceParameter)]
+enum ReportKind {
+    Report,
+    Appeal,
+}
+/// Submit a confidential report or moderation appeal; no automatic punishment.
 #[poise::command(slash_command, guild_only, user_cooldown = 60)]
-async fn report(ctx: Context<'_>) -> Result<(), Error> {
+async fn report(
+    ctx: Context<'_>,
+    #[description = "Report or moderation appeal"] kind: Option<ReportKind>,
+) -> Result<(), Error> {
     use poise::Modal;
     let Some(channel) = ctx.data().settings.read().await.report_channel else {
         return reply(ctx,"Private reports are not configured. A staff member can use /setup-report to create a private staff channel.").await;
@@ -900,14 +908,18 @@ async fn report(ctx: Context<'_>) -> Result<(), Error> {
         if inserted.rows_affected()==0{return Err("Maximum three reports per 24 hours; contact staff directly for urgent issues".into());}
         let id=inserted.last_insert_rowid();
         let message=s::CreateMessage::new().embed(embed("CONFIDENTIAL REPORT",bounded(&form.details,3000)?)
+            .field("Submission type",format!("{:?}",kind.unwrap_or(ReportKind::Report)),true)
             .field("Receipt",format!("#{id}"),true).field("Reporter",format!("<@{user}> (`{user}`)"),true).field("Reported member",member,false)
             .field("Message link",form.link.filter(|link|!link.trim().is_empty()).unwrap_or_else(||"Not provided".into()),false)
             .footer(s::CreateEmbedFooter::new("Staff review required · no automatic moderation action")).timestamp(s::Timestamp::now()))
+            .components(crate::toolbox::review_buttons(id))
             .allowed_mentions(s::CreateAllowedMentions::new());
         let delivered=channel.id.send_message(ctx.http(),message).await;
         let state=if delivered.is_ok(){"sent"}else{"failed"};
         if let Err(error)=sqlx::query("UPDATE reports SET state=? WHERE id=?").bind(state).bind(id).execute(&ctx.data().db).await{tracing::warn!(%error,"Could not save report delivery state");}
-        delivered?;Ok(id)
+        let delivered = delivered?;
+        if let Err(error) = sqlx::query("INSERT INTO review_queue(report,guild,channel,message) VALUES(?,?,?,?)").bind(id).bind(guild.to_string()).bind(channel.id.to_string()).bind(delivered.id.to_string()).execute(&ctx.data().db).await { tracing::error!(%error, "Report delivered but review queue tracking failed; use the staff channel"); }
+        Ok(id)
     }.await;
     let text = match outcome {
         Ok(id) => format!(

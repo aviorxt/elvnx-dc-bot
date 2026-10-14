@@ -9,6 +9,15 @@ pub async fn message(data: &crate::Data, m: &s::Message) -> Result<(), Error> {
         return Ok(());
     }
     let mut tx = data.db.begin().await?;
+    if sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM activity_optout WHERE guild=? AND user=?")
+        .bind(data.guild.to_string())
+        .bind(m.author.id.to_string())
+        .fetch_one(&mut *tx)
+        .await?
+        > 0
+    {
+        return Ok(());
+    }
     let inserted = sqlx::query("INSERT OR IGNORE INTO seen_messages VALUES(?,?)")
         .bind(m.id.to_string())
         .bind(s::Timestamp::now().unix_timestamp())
@@ -49,6 +58,15 @@ pub async fn voice(
     end: i64,
 ) -> Result<(), Error> {
     let mut tx = db.begin().await?;
+    if sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM activity_optout WHERE guild=? AND user=?")
+        .bind(guild.to_string())
+        .bind(user.to_string())
+        .fetch_one(&mut *tx)
+        .await?
+        > 0
+    {
+        return Ok(());
+    }
     sqlx::query("INSERT INTO activity(guild,user,voice) VALUES(?,?,?) ON CONFLICT(guild,user) DO UPDATE SET voice=voice+excluded.voice")
         .bind(guild.to_string()).bind(user.to_string()).bind(seconds).execute(&mut *tx).await?;
     for (day, amount) in voice_parts(end, seconds) {

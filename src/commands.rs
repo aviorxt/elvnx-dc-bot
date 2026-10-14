@@ -30,6 +30,7 @@ pub fn all() -> Vec<poise::Command<crate::Data, Error>> {
         ticket(),
         ticket_close(),
         say(),
+        send_attachment(),
         dm(),
         sticky(),
         sticky_remove(),
@@ -40,6 +41,7 @@ pub fn all() -> Vec<poise::Command<crate::Data, Error>> {
     commands.extend(crate::community::all());
     commands.extend(crate::music::all());
     commands.extend(crate::features::all());
+    commands.extend(crate::toolbox::all());
     commands.push(crate::afk::afk_move());
     commands.push(crate::always_react::always_react());
     commands.push(crate::legacy::appukuttan_legacy());
@@ -53,9 +55,99 @@ pub fn all() -> Vec<poise::Command<crate::Data, Error>> {
 mod tests {
     use super::*;
     #[test]
+    fn public_release_is_semver_with_a_readable_utc_build() {
+        let release = semver::Version::parse(env!("ELVNX_RELEASE")).unwrap();
+        let package = semver::Version::parse(env!("CARGO_PKG_VERSION")).unwrap();
+        assert_eq!(
+            (release.major, release.minor, release.patch),
+            (package.major, package.minor, package.patch)
+        );
+        assert_eq!(
+            release.build.as_str(),
+            format!("build.{}", env!("ELVNX_BUILD_NUMBER"))
+        );
+        let build =
+            chrono::NaiveDateTime::parse_from_str(env!("ELVNX_BUILD_NUMBER"), "%Y%m%d.%H%M%S")
+                .unwrap();
+        assert_eq!(
+            build.and_utc().timestamp().to_string(),
+            env!("ELVNX_BUILD_EPOCH")
+        );
+        assert_eq!(env!("ELVNX_BUILD_NUMBER").len(), 15);
+    }
+    #[test]
+    fn media_upload_rejects_unsafe_sources_and_sizes() {
+        let attachment = |url: &str, mime: &str, size: u64| -> s::Attachment {
+            serde_json::from_value(serde_json::json!({
+                "id":"123", "filename":"test.png", "size":size,
+                "url":url, "proxy_url":url, "content_type":mime
+            }))
+            .unwrap()
+        };
+        for mime in ["image/png", "image/svg+xml", "video/mp4", "audio/mpeg"] {
+            assert!(
+                media_source(&attachment(
+                    "https://cdn.discordapp.com/attachments/1/2/media",
+                    mime,
+                    1024
+                ))
+                .is_ok()
+            );
+        }
+        for url in [
+            "http://cdn.discordapp.com/attachments/a",
+            "https://localhost/attachments/a",
+            "https://cdn.discordapp.com.evil.test/attachments/a",
+            "https://user@cdn.discordapp.com/attachments/a",
+            "https://cdn.discordapp.com:444/attachments/a",
+            "https://cdn.discordapp.com/other/a",
+        ] {
+            assert!(media_source(&attachment(url, "image/png", 1024)).is_err());
+        }
+        for (mime, size) in [
+            ("text/html", 100),
+            ("image/png", 0),
+            ("video/mp4", MEDIA_LIMIT as u64 + 1),
+        ] {
+            assert!(
+                media_source(&attachment(
+                    "https://cdn.discordapp.com/attachments/1/2/media",
+                    mime,
+                    size
+                ))
+                .is_err()
+            );
+        }
+        let mut svg = attachment(
+            "https://cdn.discordapp.com/attachments/1/2/logo.svg",
+            "application/octet-stream",
+            100,
+        );
+        svg.filename = "logo.SVG".into();
+        assert!(media_source(&svg).is_ok());
+        svg.content_type = None;
+        assert!(media_source(&svg).is_ok());
+        let mut png = attachment(
+            "https://cdn.discordapp.com/ephemeral-attachments/1/2/photo.png?ex=123&hm=abc",
+            "application/octet-stream",
+            600 * 1024,
+        );
+        assert!(media_source(&png).is_ok());
+        png.content_type = None;
+        assert!(media_source(&png).is_ok());
+        png.filename = "PHOTO.PNG".into();
+        assert!(media_source(&png).is_ok());
+        png.filename = "program.exe".into();
+        assert!(media_source(&png).is_err());
+        png.content_type = Some("text/html".into());
+        png.filename = "photo.png".into();
+        assert!(media_source(&png).is_err());
+    }
+    #[test]
     fn command_registration_restricts_admin_messaging_and_guild_scope() {
         let commands = all();
         assert_eq!(commands.len(), crate::music::COMMAND_COUNT);
+        assert!(commands.len() <= 100);
         assert!(commands.iter().all(|c| c.guild_only));
         let names: std::collections::HashSet<_> =
             commands.iter().map(|c| c.name.as_ref()).collect();
@@ -66,11 +158,16 @@ mod tests {
         }
         for name in [
             "say",
+            "send-attachement",
             "dm",
             "sticky",
             "sticky_remove",
             "configure",
             "automod",
+            "media-panel",
+            "schedule-post",
+            "event",
+            "server-health",
         ] {
             let c = commands.iter().find(|c| c.name == name).unwrap();
             assert!(
@@ -97,7 +194,16 @@ mod tests {
 async fn help(
     ctx: Context<'_>,
     #[description = "Details page, starting at 1"] page: Option<u32>,
+    #[description = "Search command names/descriptions"] search: Option<String>,
+    #[description = "Command name to diagnose your permissions"] check_command: Option<String>,
+    #[description = "Destination for permission diagnostic"] channel: Option<s::GuildChannel>,
 ) -> Result<(), Error> {
+    if let Some(command) = check_command {
+        return crate::toolbox::permission_check(ctx, command, channel).await;
+    }
+    if let Some(query) = search {
+        return crate::toolbox::command_search(ctx, query).await;
+    }
     let commands = &ctx.framework().options.commands;
     let page = page.unwrap_or(1).clamp(1, 10);
     let names = commands
@@ -136,9 +242,10 @@ fn version_embed() -> s::CreateEmbed {
     s::CreateEmbed::new().title("ELVNX / VERSION").color(0x111111)
         .description("avior's Core · Rust Discord bot")
         .field("Version",format!("v{}",env!("CARGO_PKG_VERSION")),true)
-        .field("Build number",env!("ELVNX_BUILD_NUMBER"),true)
-        .field("Built",format!("<t:{}:F>",env!("ELVNX_BUILD_NUMBER")),false)
-        .field("Recent updates & fixes","Single-message availability panel and doodle cover\nPrivate report setup and clear permission errors\nDuplicate command cleanup\nReliable presence synchronization",false)
+        .field("Build number (UTC)",env!("ELVNX_BUILD_NUMBER"),true)
+        .field("Release",format!("`{}`",env!("ELVNX_RELEASE")),false)
+        .field("Built",format!("<t:{}:F>",env!("ELVNX_BUILD_EPOCH")),false)
+        .field("Recent updates & fixes","Media upload validation and preview panels\nPersistent scheduled posts and community events\nPrivate report/appeal review queue\nActivity privacy controls and system health alerts\nHelp search and permission diagnostics",false)
         .field("Developer","[avrxt.dev](https://www.avrxt.dev)",false)
         .footer(s::CreateEmbedFooter::new("Developed and maintained by avrxt.dev • ELVNX / 11X"))
 }
@@ -1010,6 +1117,187 @@ async fn say(
         &format!("Channel {}, message {}", channel.id, sent.id),
     )
     .await
+}
+const MEDIA_LIMIT: usize = 8 * 1024 * 1024;
+fn media_source(file: &s::Attachment) -> Result<reqwest::Url, Error> {
+    let url = reqwest::Url::parse(&file.url)
+        .map_err(|_| -> Error { "Invalid attachment URL. Upload the file again.".into() })?;
+    if file.size == 0 || file.size as usize > MEDIA_LIMIT {
+        return Err("The attachment must be nonempty and no larger than 8 MiB.".into());
+    }
+    if url.scheme() != "https"
+        || !matches!(
+            url.host_str(),
+            Some("cdn.discordapp.com" | "media.discordapp.net")
+        )
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.port().is_some()
+        || !(url.path().starts_with("/attachments/")
+            || url.path().starts_with("/ephemeral-attachments/"))
+    {
+        return Err("Use a file uploaded through Discord's attachment picker.".into());
+    }
+    let media = file
+        .content_type
+        .as_deref()
+        .unwrap_or("")
+        .split(';')
+        .next()
+        .unwrap_or("")
+        .trim()
+        .to_ascii_lowercase();
+    let filename = file.filename.to_ascii_lowercase();
+    let extension = filename.rsplit('.').next().unwrap_or("");
+    let known_extension = matches!(
+        extension,
+        "png"
+            | "jpg"
+            | "jpeg"
+            | "gif"
+            | "webp"
+            | "avif"
+            | "bmp"
+            | "tif"
+            | "tiff"
+            | "ico"
+            | "heic"
+            | "heif"
+            | "svg"
+            | "mp4"
+            | "webm"
+            | "mov"
+            | "mkv"
+            | "m4v"
+            | "avi"
+            | "mp3"
+            | "wav"
+            | "ogg"
+            | "oga"
+            | "opus"
+            | "flac"
+            | "aac"
+            | "m4a"
+            | "aiff"
+    );
+    // MIME metadata is optional on Discord attachments. Files are forwarded, never executed.
+    let generic = matches!(
+        media.as_str(),
+        "" | "application/octet-stream" | "binary/octet-stream" | "application/unknown"
+    );
+    let xml_svg = extension == "svg" && matches!(media.as_str(), "text/xml" | "application/xml");
+    if !(media.starts_with("image/")
+        || media.starts_with("video/")
+        || media.starts_with("audio/")
+        || (generic && known_extension)
+        || xml_svg)
+    {
+        return Err("Unsupported file type. Upload an image (including SVG), video, or audio file with its original extension.".into());
+    }
+    Ok(url)
+}
+pub(crate) async fn download_media(file: &s::Attachment) -> Result<(String, Vec<u8>), Error> {
+    let url = media_source(file)?;
+    let client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .timeout(std::time::Duration::from_secs(45))
+        .build()?;
+    let download_error =
+        || -> Error { "Could not download the attachment. Please upload it again.".into() };
+    let mut response = client
+        .get(url)
+        .send()
+        .await
+        .map_err(|_| download_error())?
+        .error_for_status()
+        .map_err(|_| download_error())?;
+    let mut bytes = Vec::new();
+    while let Some(chunk) = response.chunk().await.map_err(|_| download_error())? {
+        if bytes.len() + chunk.len() > MEDIA_LIMIT {
+            return Err("Attachment exceeds 8 MiB.".into());
+        }
+        bytes.extend(chunk);
+    }
+    if bytes.is_empty() || bytes.len() != file.size as usize {
+        return Err("Attachment download was incomplete. Please upload the file again.".into());
+    }
+    let filename: String = file
+        .filename
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_'))
+        .take(120)
+        .collect();
+    let filename = if filename.is_empty() {
+        "media".to_string()
+    } else {
+        filename
+    };
+    Ok((filename, bytes))
+}
+/// Upload an image, video, or audio file to a selected channel using the bot.
+#[poise::command(
+    slash_command,
+    guild_only,
+    rename = "send-attachement",
+    required_permissions = "MANAGE_GUILD",
+    default_member_permissions = "MANAGE_GUILD",
+    user_cooldown = 10
+)]
+async fn send_attachment(
+    ctx: Context<'_>,
+    #[description = "Destination text channel"] channel: s::GuildChannel,
+    #[description = "Image, video, or audio attachment, up to 8 MiB"] file: s::Attachment,
+    #[description = "Optional caption, up to 2000 characters"] caption: Option<String>,
+) -> Result<(), Error> {
+    ctx.defer_ephemeral().await?;
+    let result = async {
+        media_source(&file)?;
+        let caption = caption.unwrap_or_default();
+        if caption.encode_utf16().count() > 2000 {
+            return Err::<_, Error>("Caption must be at most 2000 characters.".into());
+        }
+        posting_channel(ctx, &channel).await?;
+        let guild = ctx.data().guild.to_partial_guild(ctx.http()).await?;
+        let bot = guild.id.member(ctx.http(), crate::bot_id(ctx)).await?;
+        if !guild
+            .user_permissions_in(&channel, &bot)
+            .contains(s::Permissions::ATTACH_FILES)
+        {
+            return Err("The bot needs Attach Files in the destination channel.".into());
+        }
+        let (filename, bytes) = download_media(&file).await?;
+        // Native attachments preserve Discord's image preview and audio/video playback controls.
+        channel
+            .id
+            .send_message(
+                ctx.http(),
+                s::CreateMessage::new()
+                    .content(caption)
+                    .add_file(s::CreateAttachment::bytes(bytes, filename))
+                    .allowed_mentions(s::CreateAllowedMentions::new()),
+            )
+            .await
+            .map_err(|_| -> Error {
+                "Could not send the file. Check the bot's channel permissions and upload limit."
+                    .into()
+            })
+    }
+    .await;
+    match result {
+        Ok(sent) => {
+            audit(
+                ctx,
+                0,
+                "send-attachement",
+                &format!(
+                    "Channel {}, message {}; media contents not retained",
+                    channel.id, sent.id
+                ),
+            )
+            .await
+        }
+        Err(error) => reply(ctx, error.to_string()).await,
+    }
 }
 /// DM a server member without disclosing the moderator's name to the recipient.
 #[poise::command(

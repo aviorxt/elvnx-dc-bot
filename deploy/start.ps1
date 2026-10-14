@@ -46,13 +46,13 @@ try {
         Start-Sleep -Seconds 5
         try {
             $status=& ssh -i $KeyPath -o BatchMode=yes $destination 'sudo python3 /opt/elvnx-bot/discord-check.py commands'
-            if ($LASTEXITCODE -eq 0 -and ($status | ConvertFrom-Json).command_count -eq 93) {$registered=$true;break}
+            if ($LASTEXITCODE -eq 0 -and ($status | ConvertFrom-Json).command_count -eq 100) {$registered=$true;break}
         } catch { }
     }
-    if (!$registered) {throw 'Service started, but registration of all 93 commands is unconfirmed. Inspect journalctl; do not print its environment.'}
+    if (!$registered) {throw 'Service started, but registration of all 100 commands is unconfirmed. Inspect journalctl; do not print its environment.'}
     & ssh -i $KeyPath -o BatchMode=yes $destination "sudo sed -i 's/^REGISTER_COMMANDS=true$/REGISTER_COMMANDS=false/' /etc/elvnx-bot/bot.env && sudo systemctl is-active elvnx-bot"
     if ($LASTEXITCODE -ne 0) {throw 'Service is not active'}
-    Write-Host 'Bot is active and all 93 guild commands are registered. Registration on reboot is disabled.'
+    Write-Host 'Bot is active and all 100 guild commands are registered. Registration on reboot is disabled.'
 } finally {
     if (Test-Path -LiteralPath $temporary) {Remove-Item -LiteralPath $temporary -Force}
     & ssh -i $KeyPath -o BatchMode=yes $destination 'rm -f /home/ubuntu/.elvnx-deploy/bot.env'
