@@ -1,0 +1,18 @@
+{
+  "spam_limit": 5,
+  "mention_limit": 5,
+  "max_characters": 1900,
+  "max_attachments": 8,
+  "max_custom_emoji": 20,
+  "caps_min_letters": 20,
+  "caps_percent": 90,
+  "block_all_links": false,
+  "allowed_domains": ["avrxt.dev", "github.com", "discord.com", "youtube.com", "youtu.be"],
+  "denied_domains": [],
+  "blocked_words": [],
+  "exempt_channels": [],
+  "exempt_roles": [],
+  "trusted_actor_ids": [],
+  "antinuke_limit": 4,
+  "antinuke_window_seconds": 15
+}

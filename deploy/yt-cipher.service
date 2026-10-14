@@ -1,0 +1,29 @@
+[Unit]
+Description=ELVNX private YouTube cipher helper
+Wants=network-online.target
+After=network-online.target
+[Service]
+User=ytcipher
+Group=ytcipher
+WorkingDirectory=/opt/yt-cipher
+EnvironmentFile=/etc/lavalink/cipher.env
+Environment=DENO_DIR=/var/lib/yt-cipher/deno
+Environment=XDG_CACHE_HOME=/var/lib/yt-cipher/cache
+ExecStart=/usr/local/bin/deno run --no-check --cached-only --allow-net --allow-read --allow-write=/var/lib/yt-cipher --allow-env server.ts
+Restart=on-failure
+RestartSec=5
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+CapabilityBoundingSet=
+ReadWritePaths=/var/lib/yt-cipher
+MemoryMax=384M
+TasksMax=64
+[Install]
+WantedBy=multi-user.target

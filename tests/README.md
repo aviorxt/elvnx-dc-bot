@@ -1,0 +1,1 @@
+Unit tests are colocated in src/store.rs, src/security.rs, src/events.rs, and src/commands.rs. They exercise SQL isolation and duplicate-ticket constraints, role ordering, input limits, automod opt-in/matching boundaries, and command permission registration. They make no Discord requests. Live integration testing needs a separate test bot and server.

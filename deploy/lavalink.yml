@@ -1,0 +1,47 @@
+server:
+  address: 127.0.0.1
+  port: 2333
+spring:
+  cloud:
+    config:
+      enabled: false
+lavalink:
+  server:
+    password: ${LAVALINK_SERVER_PASSWORD}
+    sources:
+      youtube: false
+      soundcloud: true
+      bandcamp: true
+      twitch: true
+      vimeo: false
+      nico: false
+      http: false
+      local: false
+    bufferDurationMs: 400
+    frameBufferDurationMs: 1000
+    playerUpdateInterval: 5
+    opusEncodingQuality: 5
+plugins:
+  youtube:
+    enabled: true
+    allowSearch: true
+    allowDirectVideoIds: false
+    allowDirectPlaylistIds: false
+    clients: [MUSIC, TV, TVHTML5_SIMPLY, ANDROID_VR, WEB, MWEB, IOS, WEBEMBEDDED]
+    remoteCipher:
+      url: http://127.0.0.1:8001
+      password: ${YOUTUBE_CIPHER_PASSWORD}
+      userAgent: ELVNX
+    oauth:
+      enabled: true
+      skipInitialization: true
+      refreshToken: ${YOUTUBE_REFRESH_TOKEN:}
+metrics:
+  prometheus:
+    enabled: false
+logging:
+  level:
+    root: INFO
+    dev.lavalink.youtube.http: ERROR
+  request:
+    enabled: false

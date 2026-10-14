@@ -1,0 +1,15 @@
+/target/
+/.env
+/.env.*
+!/.env.example
+/previews/
+/BUILD_OK
+*.pem
+*.key
+*.sqlite
+*.sqlite-*
+/data/
+*.db
+*.db-shm
+*.db-wal
+*.log

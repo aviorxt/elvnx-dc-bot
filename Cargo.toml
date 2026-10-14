@@ -1,0 +1,38 @@
+[package]
+name = "elvnx-bot"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+poise = "0.7"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal"] }
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "sqlite"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+dotenvy = "0.15"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+resvg = "0.48"
+base64 = "0.22"
+tokio-tungstenite = "0.21"
+futures-util = { version = "0.3", features = ["sink"] }
+chrono = "=0.4.45"
+rand = "=0.8.8"
+
+[profile.dev]
+debug = 0
+
+[profile.test]
+debug = 0
+
+[profile.release]
+lto = "thin"
+strip = true
+
+# Reduce compile memory on the 2 GB VPS while keeping optimized runtime code.
+[profile.vps]
+inherits = "release"
+lto = false
+codegen-units = 16
+opt-level = 2

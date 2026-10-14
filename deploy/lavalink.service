@@ -1,0 +1,31 @@
+[Unit]
+Description=ELVNX private Lavalink audio node
+Wants=network-online.target
+After=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=5
+[Service]
+User=lavalink
+Group=lavalink
+WorkingDirectory=/var/lib/lavalink
+EnvironmentFile=/etc/lavalink/lavalink.env
+EnvironmentFile=-/etc/lavalink/youtube.env
+ExecStart=/usr/bin/java -Xms64m -Xmx384m -XX:+UseSerialGC -jar /opt/lavalink/Lavalink.jar --spring.config.location=file:/etc/lavalink/application.yml
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+CapabilityBoundingSet=
+ReadWritePaths=/var/lib/lavalink
+MemoryMax=640M
+TasksMax=128
+[Install]
+WantedBy=multi-user.target
