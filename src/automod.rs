@@ -69,7 +69,9 @@ impl Rules {
             || self.exempt_roles.len() > 100
             || self.exempt_channels.len() > 100
         {
-            return Err("Automod thresholds are outside safe limits".into());
+            return Err(crate::errors::user(
+                "Automod thresholds are outside safe limits",
+            ));
         }
         Ok(())
     }

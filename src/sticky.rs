@@ -52,7 +52,7 @@ impl Service {
         content: String,
     ) -> Result<(), Error> {
         if content.trim().is_empty() || content.chars().count() > 1900 {
-            return Err("Sticky text must be 1–1900 characters".into());
+            return Err(crate::errors::user("Sticky text must be 1–1900 characters"));
         }
         let _guard = self.serial.lock().await;
         sqlx::query("INSERT INTO stickies(channel,guild,content) VALUES(?,?,?) ON CONFLICT(channel) DO UPDATE SET content=excluded.content").bind(channel.to_string()).bind(self.guild.to_string()).bind(&content).execute(&self.db).await?;
@@ -91,7 +91,7 @@ impl Service {
                 http,
                 s::CreateMessage::new()
                     .embed(
-                        s::CreateEmbed::new()
+                        crate::emoji::embed()
                             .title("ELVNX / STICKY")
                             .description(item.content)
                             .color(0x111111)

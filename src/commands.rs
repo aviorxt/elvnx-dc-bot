@@ -48,12 +48,122 @@ pub fn all() -> Vec<poise::Command<crate::Data, Error>> {
     commands.push(crate::rules::rules());
     commands.push(crate::live_status::bot_status_live());
     commands.push(crate::availability::availibilty_panel());
+    commands.push(crate::presence::presence());
     commands
+}
+
+/// Keep the existing guild allocation; register self-service presence and 24-7 globally.
+/// Runtime command checks still restrict every invocation to the configured guild.
+pub fn registration(
+    commands: &[poise::Command<crate::Data, Error>],
+) -> (Vec<s::CreateCommand>, Vec<s::CreateCommand>) {
+    let guild = poise::builtins::create_application_commands(
+        commands
+            .iter()
+            .filter(|c| !matches!(c.name.as_ref(), "24-7" | "presence")),
+    );
+    let global = poise::builtins::create_application_commands(
+        commands
+            .iter()
+            .filter(|c| matches!(c.name.as_ref(), "24-7" | "presence")),
+    )
+    .into_iter()
+    .map(|c| {
+        c.contexts(vec![s::InteractionContext::Guild])
+            .integration_types(vec![s::InstallationContext::Guild])
+    })
+    .collect();
+    (guild, global)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn direct_stay_alias_has_its_own_scope_and_no_dm_or_user_install_access() {
+        let commands = all();
+        let (guild, global) = registration(&commands);
+        assert_eq!(guild.len(), 100);
+        assert_eq!(global.len(), 2);
+        let sharing = global
+            .iter()
+            .find(|c| serde_json::to_value(c).unwrap()["name"] == "presence")
+            .unwrap();
+        let sharing = serde_json::to_value(sharing).unwrap();
+        assert_eq!(sharing["contexts"], serde_json::json!([0]));
+        assert_eq!(sharing["integration_types"], serde_json::json!([0]));
+        assert_eq!(sharing["options"][0]["name"], "member");
+        assert_eq!(sharing["options"][0]["type"], 6);
+        assert_eq!(sharing["options"][1]["name"], "action");
+        assert!(
+            sharing["options"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|v| v["required"] != true)
+        );
+        let json = serde_json::to_value(&global[0]).unwrap();
+        assert_eq!(json["name"], "24-7");
+        assert_eq!(json["contexts"], serde_json::json!([0]));
+        assert_eq!(json["integration_types"], serde_json::json!([0]));
+        assert_eq!(json["default_member_permissions"], "32");
+        assert_eq!(json["options"][0]["name"], "action");
+        assert_eq!(json["options"][0]["required"], true);
+        let choices = json["options"][0]["choices"].as_array().unwrap();
+        assert_eq!(choices.len(), 2);
+        assert!(choices.iter().any(|c| c["name"] == "Enable"));
+        assert!(choices.iter().any(|c| c["name"] == "Disable"));
+        assert_eq!(json["options"][1]["name"], "channel");
+        assert_eq!(json["options"][1]["channel_types"], serde_json::json!([2]));
+        let alias = commands.iter().find(|c| c.name == "24-7").unwrap();
+        assert!(alias.guild_only);
+        assert!(
+            alias
+                .required_permissions
+                .contains(s::Permissions::MANAGE_GUILD)
+        );
+        let guild_json = serde_json::to_value(guild).unwrap();
+        assert!(
+            guild_json
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|c| c["name"] != "24-7")
+        );
+    }
+    #[test]
+    fn staff_messages_select_one_format_and_disable_mentions() {
+        let plain =
+            serde_json::to_value(outgoing_message("Hello @everyone".into(), false).unwrap())
+                .unwrap();
+        assert_eq!(plain["content"], "Hello @everyone");
+        assert!(
+            plain
+                .get("embeds")
+                .and_then(|v| v.as_array())
+                .is_none_or(|v| v.is_empty())
+        );
+        let embedded =
+            serde_json::to_value(outgoing_message("Hello @everyone".into(), true).unwrap())
+                .unwrap();
+        assert_eq!(embedded["embeds"][0]["description"], "Hello @everyone");
+        assert!(
+            embedded
+                .get("content")
+                .is_none_or(|v| v.is_null() || v == "")
+        );
+        for body in [&plain, &embedded] {
+            assert!(
+                body["allowed_mentions"]["parse"]
+                    .as_array()
+                    .unwrap()
+                    .is_empty()
+            );
+        }
+        assert!(outgoing_message(" ".into(), false).is_err());
+        assert!(outgoing_message("😀".repeat(1001), false).is_err());
+        assert!(outgoing_message("x".repeat(2000), true).is_ok());
+    }
     #[test]
     fn public_release_is_semver_with_a_readable_utc_build() {
         let release = semver::Version::parse(env!("ELVNX_RELEASE")).unwrap();
@@ -147,7 +257,7 @@ mod tests {
     fn command_registration_restricts_admin_messaging_and_guild_scope() {
         let commands = all();
         assert_eq!(commands.len(), crate::music::COMMAND_COUNT);
-        assert!(commands.len() <= 100);
+        assert_eq!(registration(&commands).0.len(), 100);
         assert!(commands.iter().all(|c| c.guild_only));
         let names: std::collections::HashSet<_> =
             commands.iter().map(|c| c.name.as_ref()).collect();
@@ -239,13 +349,13 @@ async fn version(ctx: Context<'_>) -> Result<(), Error> {
     Ok(())
 }
 fn version_embed() -> s::CreateEmbed {
-    s::CreateEmbed::new().title("ELVNX / VERSION").color(0x111111)
+    crate::emoji::embed().title("ELVNX / VERSION").color(0x111111)
         .description("avior's Core · Rust Discord bot")
         .field("Version",format!("v{}",env!("CARGO_PKG_VERSION")),true)
         .field("Build number (UTC)",env!("ELVNX_BUILD_NUMBER"),true)
         .field("Release",format!("`{}`",env!("ELVNX_RELEASE")),false)
         .field("Built",format!("<t:{}:F>",env!("ELVNX_BUILD_EPOCH")),false)
-        .field("Recent updates & fixes","Media upload validation and preview panels\nPersistent scheduled posts and community events\nPrivate report/appeal review queue\nActivity privacy controls and system health alerts\nHelp search and permission diagnostics",false)
+        .field("Recent updates & fixes","Opt-in presence REST API and live WebSocket updates\nSelf-service sharing consent and revocation\nFiltered activity fields with no presence history\nMusic request channel, Add track form and session recaps\nShared playlist favorites and persistent 24/7 voice mode\nPremium Listening Room with progress and queue preview\nSeeking, volume presets and contextual music controls\nVoice room Speak permission inheritance fixed\nPremium voice lounge with 15 owner controls\nExpiring member invitation DMs and guest access\nStructured activity desk and before/after logs\nDiscord audit actors, targets and reasons\nPrivate log enforcement and bounded message cache\nVerification approval DMs and honeypot recovery\n40 animated custom glyph emoji",false)
         .field("Developer","[avrxt.dev](https://www.avrxt.dev)",false)
         .footer(s::CreateEmbedFooter::new("Developed and maintained by avrxt.dev • ELVNX / 11X"))
 }
@@ -587,7 +697,7 @@ async fn lock(ctx: Context<'_>) -> Result<(), Error> {
         .to_channel(ctx.http())
         .await?
         .guild()
-        .ok_or("Guild channel required")?;
+        .ok_or_else(|| crate::errors::user("Guild channel required"))?;
     let role = s::RoleId::new(ctx.data().guild.get());
     let existing = ch
         .permission_overwrites
@@ -604,7 +714,7 @@ async fn lock(ctx: Context<'_>) -> Result<(), Error> {
         .bind(deny.bits().to_string())
         .execute(&ctx.data().db)
         .await
-        .map_err(|_| "Channel already locked or database unavailable")?;
+        .map_err(|_| crate::errors::user("Channel already locked or database unavailable"))?;
     if let Err(e) = ch
         .id
         .create_permission(
@@ -641,7 +751,7 @@ async fn unlock(ctx: Context<'_>) -> Result<(), Error> {
         .bind(ctx.channel_id().to_string())
         .fetch_optional(&ctx.data().db)
         .await?
-        .ok_or("No saved channel lock")?;
+        .ok_or_else(|| crate::errors::user("No saved channel lock"))?;
     let role = s::RoleId::new(ctx.data().guild.get());
     if row.get::<i64, _>("had_override") == 0 {
         ctx.channel_id()
@@ -673,6 +783,9 @@ async fn unlock(ctx: Context<'_>) -> Result<(), Error> {
 
 #[derive(Debug, Clone, Copy, poise::ChoiceParameter)]
 enum Setting {
+    MusicRequestChannel,
+    MusicFavoriteChannel,
+    MusicRecaps,
     LogChannel,
     WelcomeChannel,
     WelcomeMessage,
@@ -694,46 +807,103 @@ async fn configure(
 ) -> Result<(), Error> {
     let _guard = ctx.data().configuration_lock.lock().await;
     let mut cfg = ctx.data().settings.read().await.clone();
-    let number = if value == "off" || matches!(setting, Setting::WelcomeMessage) {
-        None
-    } else {
-        Some(value.trim().parse::<u64>()?)
-    };
+    let number =
+        if value == "off" || matches!(setting, Setting::WelcomeMessage | Setting::MusicRecaps) {
+            None
+        } else {
+            Some(value.trim().parse::<u64>()?)
+        };
     if let Some(id) = number {
         if matches!(setting, Setting::AutoRole | Setting::TicketStaffRole) {
             let guild = ctx.data().guild.to_partial_guild(ctx.http()).await?;
             let role = guild
                 .roles
                 .get(&s::RoleId::new(id))
-                .ok_or("Role not found")?;
+                .ok_or_else(|| crate::errors::user("Role not found"))?;
             if matches!(setting, Setting::AutoRole) {
                 security::safe_role(ctx, role).await?;
+                if crate::verification::reserved(ctx.data(), id).await? {
+                    return Err(crate::errors::user(
+                        "Verification access cannot be granted as an autorole.",
+                    ));
+                }
             } else if id == guild.id.get() || role.managed {
-                return Err("Use a normal private staff role".into());
+                return Err(crate::errors::user("Use a normal private staff role"));
             }
         } else {
             let ch = s::ChannelId::new(id)
                 .to_channel(ctx.http())
                 .await?
                 .guild()
-                .ok_or("Guild channel required")?;
+                .ok_or_else(|| crate::errors::user("Guild channel required"))?;
             if ch.guild_id != ctx.data().guild {
-                return Err("Channel belongs to another server".into());
+                return Err(crate::errors::user("Channel belongs to another server"));
             }
             if matches!(setting, Setting::TicketCategory) && ch.kind != s::ChannelType::Category {
-                return Err("Choose a category ID".into());
+                return Err(crate::errors::user("Choose a category ID"));
             }
             if !matches!(setting, Setting::TicketCategory) && ch.kind != s::ChannelType::Text {
-                return Err("Choose a text channel ID".into());
+                return Err(crate::errors::user("Choose a text channel ID"));
             }
         }
     }
+    if number.is_some()
+        && ((matches!(setting, Setting::MusicRequestChannel)
+            && number == cfg.music_favorite_channel)
+            || (matches!(setting, Setting::MusicFavoriteChannel)
+                && number == cfg.music_request_channel))
+    {
+        return Err(crate::errors::user(
+            "Choose separate channels for live requests and saved favorites.",
+        ));
+    }
+    if matches!(
+        setting,
+        Setting::MusicRequestChannel | Setting::MusicFavoriteChannel
+    ) && let Some(id) = number
+    {
+        if std::env::var("ENABLE_MESSAGE_CONTENT").as_deref() != Ok("true") {
+            return Err(crate::errors::user(
+                "Enable Message Content Intent before configuring music requests.",
+            ));
+        }
+        let ch = s::ChannelId::new(id)
+            .to_channel(ctx.http())
+            .await?
+            .guild()
+            .ok_or_else(|| crate::errors::user("Choose a text channel."))?;
+        posting_channel(ctx, &ch).await?;
+        let guild = ctx.data().guild.to_partial_guild(ctx.http()).await?;
+        let bot = ctx
+            .data()
+            .guild
+            .member(ctx.http(), crate::bot_id(ctx))
+            .await?;
+        if !guild.user_permissions_in(&ch, &bot).contains(
+            s::Permissions::EMBED_LINKS
+                | s::Permissions::ATTACH_FILES
+                | s::Permissions::READ_MESSAGE_HISTORY,
+        ) {
+            return Err(crate::errors::user(
+                "The bot needs Embed Links, Attach Files and Read Message History in the request channel.",
+            ));
+        }
+    }
     match setting {
+        Setting::MusicFavoriteChannel => cfg.music_favorite_channel = number,
+        Setting::MusicRequestChannel => cfg.music_request_channel = number,
+        Setting::MusicRecaps => {
+            cfg.music_recaps_disabled = match value.trim().to_ascii_lowercase().as_str() {
+                "on" => false,
+                "off" => true,
+                _ => return Err(crate::errors::user("Use on or off for MusicRecaps.")),
+            }
+        }
         Setting::LogChannel => cfg.log_channel = number,
         Setting::WelcomeChannel => cfg.welcome_channel = number,
         Setting::WelcomeMessage => {
             if value.chars().count() > 1500 {
-                return Err("Welcome text too long".into());
+                return Err(crate::errors::user("Welcome text too long"));
             }
             cfg.welcome_message = if value == "off" { String::new() } else { value };
         }
@@ -743,6 +913,13 @@ async fn configure(
     }
     store::save(&ctx.data().db, ctx.data().guild.get(), &cfg).await?;
     *ctx.data().settings.write().await = cfg;
+    drop(_guard);
+    if matches!(
+        setting,
+        Setting::MusicRequestChannel | Setting::MusicFavoriteChannel
+    ) {
+        crate::music::refresh_requests(ctx.serenity_context(), ctx.data()).await?;
+    }
     reply(ctx, "Configuration saved.").await
 }
 /// Configure automod: spam, mass mentions, blocked words, and optional invite blocking.
@@ -774,7 +951,7 @@ async fn automod(
         .filter(|s| !s.is_empty())
         .collect();
     if words.len() > 50 || words.iter().any(|w| w.len() > 60) {
-        return Err("Maximum 50 words of 60 bytes each".into());
+        return Err(crate::errors::user("Maximum 50 words of 60 bytes each"));
     }
     cfg.automod = enabled;
     cfg.block_invites = block_invites;
@@ -801,6 +978,11 @@ async fn selfrole_allow(
     security::safe_role(ctx, &role).await?;
     let _guard = ctx.data().configuration_lock.lock().await;
     let mut cfg = ctx.data().settings.read().await.clone();
+    if crate::verification::reserved(ctx.data(), role.id.get()).await? {
+        return Err(crate::errors::user(
+            "The verification role is reserved for the verification system, not public self-service.",
+        ));
+    }
     if !cfg.self_roles.contains(&role.id.get()) {
         cfg.self_roles.push(role.id.get());
     }
@@ -832,6 +1014,11 @@ async fn selfrole(
     ctx: Context<'_>,
     #[description = "Approved role"] role: s::Role,
 ) -> Result<(), Error> {
+    if crate::verification::reserved(ctx.data(), role.id.get()).await? {
+        return Err(crate::errors::user(
+            "Use the server's verification panel to obtain this access role.",
+        ));
+    }
     if !ctx
         .data()
         .settings
@@ -849,7 +1036,10 @@ async fn selfrole(
         .member(ctx.http(), crate::bot_id(ctx))
         .await?;
     // Revalidate permissions at use time in case the configured role was promoted.
-    let current = guild.roles.get(&role.id).ok_or("Role not found")?;
+    let current = guild
+        .roles
+        .get(&role.id)
+        .ok_or_else(|| crate::errors::user("Role not found"))?;
     if current.managed
         || !current.permissions.is_empty()
         || !security::higher(
@@ -938,10 +1128,10 @@ async fn ticket(
     let cfg = ctx.data().settings.read().await.clone();
     let category = cfg
         .ticket_category
-        .ok_or("Ticket category not configured")?;
+        .ok_or_else(|| crate::errors::user("Ticket category not configured"))?;
     let staff = cfg
         .ticket_staff_role
-        .ok_or("Ticket staff role not configured")?;
+        .ok_or_else(|| crate::errors::user("Ticket staff role not configured"))?;
     let existing: Option<String> =
         sqlx::query_scalar("SELECT channel FROM tickets WHERE guild=? AND owner=? AND closed=0")
             .bind(ctx.data().guild.to_string())
@@ -1024,7 +1214,11 @@ async fn ticket_close(ctx: Context<'_>) -> Result<(), Error> {
             .bind(ctx.channel_id().to_string())
             .fetch_optional(&ctx.data().db)
             .await?;
-    let owner: s::UserId = s::UserId::new(owner.ok_or("Not an open ticket")?.parse()?);
+    let owner: s::UserId = s::UserId::new(
+        owner
+            .ok_or_else(|| crate::errors::user("Not an open ticket"))?
+            .parse()?,
+    );
     let guild = ctx.data().guild.to_partial_guild(ctx.http()).await?;
     let member = ctx.data().guild.member(ctx.http(), ctx.author().id).await?;
     if owner != ctx.author().id
@@ -1064,7 +1258,7 @@ async fn ticket_close(ctx: Context<'_>) -> Result<(), Error> {
 
 pub async fn posting_channel(ctx: Context<'_>, channel: &s::GuildChannel) -> Result<(), Error> {
     if channel.guild_id != ctx.data().guild || channel.kind != s::ChannelType::Text {
-        return Err("Choose a text channel in this server".into());
+        return Err(crate::errors::user("Choose a text channel in this server"));
     }
     let guild = ctx.data().guild.to_partial_guild(ctx.http()).await?;
     for user in [ctx.author().id, crate::bot_id(ctx)] {
@@ -1073,7 +1267,9 @@ pub async fn posting_channel(ctx: Context<'_>, channel: &s::GuildChannel) -> Res
             .user_permissions_in(channel, &member)
             .contains(s::Permissions::VIEW_CHANNEL | s::Permissions::SEND_MESSAGES)
         {
-            return Err("You and the bot need access to the destination channel".into());
+            return Err(crate::errors::user(
+                "You and the bot need access to the destination channel",
+            ));
         }
     }
     Ok(())
@@ -1088,28 +1284,25 @@ pub async fn posting_channel(ctx: Context<'_>, channel: &s::GuildChannel) -> Res
 )]
 async fn say(
     ctx: Context<'_>,
-    #[description = "Destination"] channel: s::GuildChannel,
+    #[description = "True: styled embed; false: plain message"] embed: bool,
     #[description = "Text, max 2000 characters"] message: String,
+    #[description = "Destination"] channel: s::GuildChannel,
 ) -> Result<(), Error> {
-    if message.trim().is_empty() || message.chars().count() > 2000 {
-        return Err("Message must be 1–2000 characters".into());
-    }
+    let outgoing = outgoing_message(message, embed)?;
     posting_channel(ctx, &channel).await?;
-    let sent = channel
-        .id
-        .send_message(
-            ctx.http(),
-            s::CreateMessage::new()
-                .embed(
-                    s::CreateEmbed::new()
-                        .title("ELVNX / MESSAGE")
-                        .description(message)
-                        .color(0x111111)
-                        .footer(s::CreateEmbedFooter::new("11X • private collective")),
-                )
-                .allowed_mentions(s::CreateAllowedMentions::new()),
-        )
-        .await?;
+    if embed {
+        let guild = ctx.data().guild.to_partial_guild(ctx.http()).await?;
+        let bot = guild.id.member(ctx.http(), crate::bot_id(ctx)).await?;
+        if !guild
+            .user_permissions_in(&channel, &bot)
+            .contains(s::Permissions::EMBED_LINKS)
+        {
+            return Err(crate::errors::user(
+                "The bot needs Embed Links in the destination channel for embed:true. Ask staff to grant it, or use embed:false for a plain message.",
+            ));
+        }
+    }
+    let sent = channel.id.send_message(ctx.http(), outgoing).await?;
     audit(
         ctx,
         0,
@@ -1120,10 +1313,13 @@ async fn say(
 }
 const MEDIA_LIMIT: usize = 8 * 1024 * 1024;
 fn media_source(file: &s::Attachment) -> Result<reqwest::Url, Error> {
-    let url = reqwest::Url::parse(&file.url)
-        .map_err(|_| -> Error { "Invalid attachment URL. Upload the file again.".into() })?;
+    let url = reqwest::Url::parse(&file.url).map_err(|_| -> Error {
+        crate::errors::user("Invalid attachment URL. Upload the file again.")
+    })?;
     if file.size == 0 || file.size as usize > MEDIA_LIMIT {
-        return Err("The attachment must be nonempty and no larger than 8 MiB.".into());
+        return Err(crate::errors::user(
+            "The attachment must be nonempty and no larger than 8 MiB.",
+        ));
     }
     if url.scheme() != "https"
         || !matches!(
@@ -1136,7 +1332,9 @@ fn media_source(file: &s::Attachment) -> Result<reqwest::Url, Error> {
         || !(url.path().starts_with("/attachments/")
             || url.path().starts_with("/ephemeral-attachments/"))
     {
-        return Err("Use a file uploaded through Discord's attachment picker.".into());
+        return Err(crate::errors::user(
+            "Use a file uploaded through Discord's attachment picker.",
+        ));
     }
     let media = file
         .content_type
@@ -1192,7 +1390,9 @@ fn media_source(file: &s::Attachment) -> Result<reqwest::Url, Error> {
         || (generic && known_extension)
         || xml_svg)
     {
-        return Err("Unsupported file type. Upload an image (including SVG), video, or audio file with its original extension.".into());
+        return Err(crate::errors::user(
+            "Unsupported file type. Upload an image (including SVG), video, or audio file with its original extension.",
+        ));
     }
     Ok(url)
 }
@@ -1202,8 +1402,9 @@ pub(crate) async fn download_media(file: &s::Attachment) -> Result<(String, Vec<
         .redirect(reqwest::redirect::Policy::none())
         .timeout(std::time::Duration::from_secs(45))
         .build()?;
-    let download_error =
-        || -> Error { "Could not download the attachment. Please upload it again.".into() };
+    let download_error = || -> Error {
+        crate::errors::user("Could not download the attachment. Please upload it again.")
+    };
     let mut response = client
         .get(url)
         .send()
@@ -1214,12 +1415,14 @@ pub(crate) async fn download_media(file: &s::Attachment) -> Result<(String, Vec<
     let mut bytes = Vec::new();
     while let Some(chunk) = response.chunk().await.map_err(|_| download_error())? {
         if bytes.len() + chunk.len() > MEDIA_LIMIT {
-            return Err("Attachment exceeds 8 MiB.".into());
+            return Err(crate::errors::user("Attachment exceeds 8 MiB."));
         }
         bytes.extend(chunk);
     }
     if bytes.is_empty() || bytes.len() != file.size as usize {
-        return Err("Attachment download was incomplete. Please upload the file again.".into());
+        return Err(crate::errors::user(
+            "Attachment download was incomplete. Please upload the file again.",
+        ));
     }
     let filename: String = file
         .filename
@@ -1254,7 +1457,9 @@ async fn send_attachment(
         media_source(&file)?;
         let caption = caption.unwrap_or_default();
         if caption.encode_utf16().count() > 2000 {
-            return Err::<_, Error>("Caption must be at most 2000 characters.".into());
+            return Err(crate::errors::user(
+                "Caption must be at most 2000 characters.",
+            ));
         }
         posting_channel(ctx, &channel).await?;
         let guild = ctx.data().guild.to_partial_guild(ctx.http()).await?;
@@ -1263,7 +1468,9 @@ async fn send_attachment(
             .user_permissions_in(&channel, &bot)
             .contains(s::Permissions::ATTACH_FILES)
         {
-            return Err("The bot needs Attach Files in the destination channel.".into());
+            return Err(crate::errors::user(
+                "The bot needs Attach Files in the destination channel.",
+            ));
         }
         let (filename, bytes) = download_media(&file).await?;
         // Native attachments preserve Discord's image preview and audio/video playback controls.
@@ -1277,10 +1484,7 @@ async fn send_attachment(
                     .allowed_mentions(s::CreateAllowedMentions::new()),
             )
             .await
-            .map_err(|_| -> Error {
-                "Could not send the file. Check the bot's channel permissions and upload limit."
-                    .into()
-            })
+            .map_err(|error| -> Error { error.into() })
     }
     .await;
     match result {
@@ -1296,10 +1500,35 @@ async fn send_attachment(
             )
             .await
         }
-        Err(error) => reply(ctx, error.to_string()).await,
+        Err(error) => {
+            reply(
+                ctx,
+                crate::errors::with_reference(error.as_ref(), "send-attachement", ctx.id()),
+            )
+            .await
+        }
     }
 }
-/// DM a server member without disclosing the moderator's name to the recipient.
+fn outgoing_message(message: String, embed: bool) -> Result<s::CreateMessage, Error> {
+    if message.trim().is_empty() || message.encode_utf16().count() > 2000 {
+        return Err(crate::errors::user(
+            "Message must contain 1–2000 characters. Shorten it or split it into separate messages.",
+        ));
+    }
+    let outgoing = s::CreateMessage::new().allowed_mentions(s::CreateAllowedMentions::new());
+    Ok(if embed {
+        outgoing.embed(
+            crate::emoji::embed()
+                .title("ELVNX / MESSAGE")
+                .description(message)
+                .color(0x111111)
+                .footer(s::CreateEmbedFooter::new("11X • private collective")),
+        )
+    } else {
+        outgoing.content(message)
+    })
+}
+/// DM a server member as plain text or an embed; the moderator's name stays private.
 #[poise::command(
     slash_command,
     guild_only,
@@ -1309,29 +1538,19 @@ async fn send_attachment(
 )]
 async fn dm(
     ctx: Context<'_>,
-    #[description = "Recipient"] member: s::Member,
+    #[description = "True: styled embed; false: plain message"] embed: bool,
     #[description = "Message, max 2000 characters"] message: String,
+    #[description = "Recipient"] member: s::Member,
 ) -> Result<(), Error> {
-    if member.user.bot || message.trim().is_empty() || message.chars().count() > 2000 {
-        return Err("Choose a human member and 1–2000 characters".into());
+    if member.user.bot {
+        return Err(crate::errors::user(
+            "Choose a human server member as the DM recipient.",
+        ));
     }
+    let outgoing = outgoing_message(message, embed)?;
     ctx.defer_ephemeral().await?;
     ctx.data().guild.member(ctx.http(), member.user.id).await?;
-    let sent = member
-        .user
-        .direct_message(
-            ctx.http(),
-            s::CreateMessage::new()
-                .embed(
-                    s::CreateEmbed::new()
-                        .title("ELVNX / MESSAGE")
-                        .description(message)
-                        .color(0x111111)
-                        .footer(s::CreateEmbedFooter::new("11X • private collective")),
-                )
-                .allowed_mentions(s::CreateAllowedMentions::new()),
-        )
-        .await?;
+    let sent = member.user.direct_message(ctx.http(), outgoing).await?;
     if let Err(error) = sqlx::query("INSERT INTO outgoing_dms VALUES(?,?,?,?)")
         .bind(ctx.data().guild.to_string())
         .bind(member.user.id.to_string())

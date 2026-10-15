@@ -67,7 +67,9 @@ pub async fn rules(
         .user_permissions_in(&channel, &bot)
         .contains(s::Permissions::EMBED_LINKS | s::Permissions::ATTACH_FILES)
     {
-        return Err("Grant the bot Embed Links and Attach Files in the rules channel".into());
+        return Err(crate::errors::user(
+            "Grant the bot Embed Links and Attach Files in the rules channel",
+        ));
     }
     let date = s::Timestamp::from_unix_timestamp(s::Timestamp::now().unix_timestamp() + 19_800)?
         .to_string()
@@ -75,7 +77,7 @@ pub async fn rules(
         .take(10)
         .collect::<String>();
     let cover = cards::rules_cover(&guild.name, &date)?;
-    let mut embed = s::CreateEmbed::new()
+    let mut embed = crate::emoji::embed()
         .title(format!("{} / SERVER RULES", guild.name))
         .description("A private space to build, play, watch, and share. These standards apply across text, voice, gaming, movie, and asset channels. By participating, you agree to follow them.")
         .color(0x111111)
@@ -90,7 +92,7 @@ pub async fn rules(
             ctx.http(),
             s::CreateMessage::new()
                 .embeds(vec![
-                    s::CreateEmbed::new()
+                    crate::emoji::embed()
                         .color(0x111111)
                         .image("attachment://rules-cover.png"),
                     embed,

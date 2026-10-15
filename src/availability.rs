@@ -295,6 +295,27 @@ impl Service {
         }
         self.dirty.store(true, Ordering::Relaxed);
     }
+    /// Fail closed during gateway outages, roster reloads and guild unavailability.
+    pub async fn api_snapshot(
+        &self,
+        id: s::UserId,
+    ) -> Result<(s::User, Option<s::Presence>), axum::http::StatusCode> {
+        let observed = self.observed.read().await;
+        if !observed.ready || !self.connected.load(Ordering::Relaxed) {
+            return Err(axum::http::StatusCode::SERVICE_UNAVAILABLE);
+        }
+        let guild = self
+            .ctx
+            .cache
+            .guild(self.guild)
+            .ok_or(axum::http::StatusCode::SERVICE_UNAVAILABLE)?;
+        let member = guild
+            .members
+            .get(&id)
+            .filter(|m| !m.user.bot)
+            .ok_or(axum::http::StatusCode::NOT_FOUND)?;
+        Ok((member.user.clone(), observed.presences.get(&id).cloned()))
+    }
     async fn snapshot(&self, cfg: &Config) -> Snapshot {
         let observed = self.observed.read().await;
         let Some(guild) = self.ctx.cache.guild(self.guild) else {
@@ -409,11 +430,13 @@ impl Service {
     ) -> Result<Option<s::GuildChannel>, Error> {
         match s::ChannelId::new(id).to_channel(&self.ctx.http).await {
             Ok(channel) => {
-                let channel = channel.guild().ok_or("Server channel required")?;
+                let channel = channel
+                    .guild()
+                    .ok_or_else(|| crate::errors::user("Server channel required"))?;
                 if channel.guild_id != self.guild || channel.kind != kind {
-                    return Err(
-                        "Stored availability resource belongs to a different server or type".into(),
-                    );
+                    return Err(crate::errors::user(
+                        "Stored availability resource belongs to a different server or type",
+                    ));
                 }
                 Ok(Some(channel))
             }
@@ -436,13 +459,17 @@ impl Service {
         if std::env::var("ENABLE_PRESENCE_EVENTS").as_deref() != Ok("true")
             || std::env::var("ENABLE_MEMBER_EVENTS").as_deref() != Ok("true")
         {
-            return Err("Enable Discord Presence and Server Members intents plus ENABLE_PRESENCE_EVENTS=true and ENABLE_MEMBER_EVENTS=true before creating the panel".into());
+            return Err(crate::errors::user(
+                "Enable Discord Presence and Server Members intents plus ENABLE_PRESENCE_EVENTS=true and ENABLE_MEMBER_EVENTS=true before creating the panel",
+            ));
         }
         if cfg.category.is_some()
             && audience.map(|id| id.get()) != cfg.audience
             && audience.is_some()
         {
-            return Err("This panel keeps its original audience. Omit the audience option when resuming; changing its audience requires an administrator to migrate its saved configuration and permissions together.".into());
+            return Err(crate::errors::user(
+                "This panel keeps its original audience. Omit the audience option when resuming; changing its audience requires an administrator to migrate its saved configuration and permissions together.",
+            ));
         }
         if cfg.category.is_none() {
             let guild = self.guild.to_partial_guild(&self.ctx.http).await?;
@@ -525,7 +552,9 @@ impl Service {
             };
             if let Some(channel) = existing {
                 if channel.parent_id != Some(category.id) {
-                    return Err("A tracked availability channel was moved; restore its parent category before resuming".into());
+                    return Err(crate::errors::user(
+                        "A tracked availability channel was moved; restore its parent category before resuming",
+                    ));
                 }
             } else {
                 let channel=self.guild.create_channel(&self.ctx.http,s::CreateChannel::new(name).kind(s::ChannelType::Text).category(category.id).permissions(overwrites.clone()).topic("Live member availability • invisible appears offline • visible voice channels only")).await?;
@@ -597,9 +626,9 @@ impl Service {
                         Err(s::Error::Http(e))
                             if e.status_code().is_some_and(|s| s.as_u16() == 404) => {}
                         Ok(_) => {
-                            return Err(
-                                "Refusing to remove another author's availability message".into()
-                            );
+                            return Err(crate::errors::user(
+                                "Refusing to remove another author's availability message",
+                            ));
                         }
                         Err(e) => return Err(e.into()),
                     }
@@ -627,9 +656,9 @@ impl Service {
     ) -> Result<(), Error> {
         let board = cfg.boards[index].clone();
         let Some(channel) = self.channel(board.channel, s::ChannelType::Text).await? else {
-            return Err(
-                "Availability channel deleted; rerun /availibilty-panel to recreate it".into(),
-            );
+            return Err(crate::errors::user(
+                "Availability channel deleted; rerun /availibilty-panel to recreate it",
+            ));
         };
         // Fail closed if the configured audience was changed through channel overrides.
         if let Err(error) = self.check_audience(cfg, &channel) {
@@ -640,11 +669,15 @@ impl Service {
                     .await
                 {
                     Ok(message) if message.author.id == self.ctx.cache.current_user().id => {
-                        channel.id.edit_message(&self.ctx.http,message.id,s::EditMessage::new().embed(s::CreateEmbed::new().title("ELVNX / AVAILABILITY PROTECTED").description("Member lists hidden because this channel's audience permissions changed. Restore the configured private audience to resume.").color(0x111111)).attachments(s::EditAttachments::new()).allowed_mentions(s::CreateAllowedMentions::new())).await?;
+                        channel.id.edit_message(&self.ctx.http,message.id,s::EditMessage::new().embed(crate::emoji::embed_for("user").title("ELVNX / AVAILABILITY PROTECTED").description("Member lists hidden because this channel's audience permissions changed. Restore the configured private audience to resume.").color(0x111111)).attachments(s::EditAttachments::new()).allowed_mentions(s::CreateAllowedMentions::new())).await?;
                     }
                     Err(s::Error::Http(e))
                         if e.status_code().is_some_and(|s| s.as_u16() == 404) => {}
-                    Ok(_) => return Err("Refusing to redact another author's message".into()),
+                    Ok(_) => {
+                        return Err(crate::errors::user(
+                            "Refusing to redact another author's message",
+                        ));
+                    }
                     Err(e) => return Err(e.into()),
                 }
             }
@@ -735,7 +768,7 @@ impl Service {
         let mut ids = Vec::new();
         for (page, body) in text.iter().enumerate() {
             let title = format!("ELVNX / {label} · {}", page + 1);
-            let mut embed=s::CreateEmbed::new().title(&title).description(body).color(0x111111).timestamp(s::Timestamp::now()).footer(s::CreateEmbedFooter::new("11X / live availability · invisible appears Offline · stale timestamp means the updater may be offline"));
+            let mut embed=crate::emoji::embed_for("user").title(&title).description(body).color(0x111111).timestamp(s::Timestamp::now()).footer(s::CreateEmbedFooter::new("11X / live availability · invisible appears Offline · stale timestamp means the updater may be offline"));
             if cfg.enabled && snapshot.ready {
                 for (group, label) in ["● ONLINE", "○ OFFLINE", "◇ GAMING", "↗ ON VC"]
                     .into_iter()
@@ -781,7 +814,9 @@ impl Service {
             };
             let id = if let Some(message) = existing {
                 if message.author.id != self.ctx.cache.current_user().id {
-                    return Err("Stored availability message is not owned by this bot".into());
+                    return Err(crate::errors::user(
+                        "Stored availability message is not owned by this bot",
+                    ));
                 }
                 let mut edit = s::EditMessage::new()
                     .embed(embed)
@@ -834,7 +869,11 @@ impl Service {
                         .await?;
                 }
                 Err(s::Error::Http(e)) if e.status_code().is_some_and(|s| s.as_u16() == 404) => {}
-                Ok(_) => return Err("Refusing to delete another author's message".into()),
+                Ok(_) => {
+                    return Err(crate::errors::user(
+                        "Refusing to delete another author's message",
+                    ));
+                }
                 Err(e) => return Err(e.into()),
             }
         }
@@ -854,27 +893,27 @@ impl Service {
             .ctx
             .cache
             .guild(self.guild)
-            .ok_or("Guild cache unavailable")?;
-        let role = guild
-            .roles
-            .get(&s::RoleId::new(audience))
-            .ok_or("Availability audience role was removed; pause the panel")?;
+            .ok_or_else(|| crate::errors::user("Guild cache unavailable"))?;
+        let role = guild.roles.get(&s::RoleId::new(audience)).ok_or_else(|| {
+            crate::errors::user("Availability audience role was removed; pause the panel")
+        })?;
         if !role.permissions.contains(s::Permissions::ADMINISTRATOR)
             && !channel.permission_overwrites.iter().any(|o| {
                 o.kind == s::PermissionOverwriteType::Role(s::RoleId::new(audience))
                     && o.allow.contains(s::Permissions::VIEW_CHANNEL)
             })
         {
-            return Err(
-                "The availability audience lost channel access; restore its View Channel override"
-                    .into(),
-            );
+            return Err(crate::errors::user(
+                "The availability audience lost channel access; restore its View Channel override",
+            ));
         }
         if !channel.permission_overwrites.iter().any(|o| {
             o.kind == s::PermissionOverwriteType::Role(s::RoleId::new(self.guild.get()))
                 && o.deny.contains(s::Permissions::VIEW_CHANNEL)
         }) {
-            return Err("Restricted availability channel became public; restore its everyone View Channel denial".into());
+            return Err(crate::errors::user(
+                "Restricted availability channel became public; restore its everyone View Channel denial",
+            ));
         }
         for overwrite in channel
             .permission_overwrites
@@ -888,7 +927,9 @@ impl Service {
                         .get(&id)
                         .is_some_and(|r| r.permissions.contains(s::Permissions::ADMINISTRATOR))
                     {
-                        return Err("Availability channel grants access beyond its configured audience; restore its private permissions".into());
+                        return Err(crate::errors::user(
+                            "Availability channel grants access beyond its configured audience; restore its private permissions",
+                        ));
                     }
                 }
                 s::PermissionOverwriteType::Member(id)
@@ -900,7 +941,9 @@ impl Service {
                                 .contains(s::Permissions::ADMINISTRATOR)
                         }) =>
                 {
-                    return Err("Availability channel grants access to an additional member; restore its audience permissions".into());
+                    return Err(crate::errors::user(
+                        "Availability channel grants access to an additional member; restore its audience permissions",
+                    ));
                 }
                 _ => {}
             }
@@ -939,7 +982,7 @@ pub async fn availibilty_panel(
         .availability
         .setup(enabled.unwrap_or(true), audience.map(|r| r.id))
         .await;
-    match outcome{Ok(cfg)=>reply(ctx,if cfg.enabled{format!("Availability panel enabled in <#{}>. One read-only channel shows a single live embed with the cover, Online, Offline, Gaming, and On VC. Live changes refresh within about five seconds, subject to Discord rate limits. Re-running reuses tracked resources; invisible users appear Offline.",cfg.boards.first().map(|board|board.channel).ok_or("Missing availability channel")?)}else{"Availability updates paused; channels remain.".into()}).await,Err(error)=>reply(ctx,format!("**Availability setup could not be completed**\n{error}")).await}
+    match outcome{Ok(cfg)=>reply(ctx,if cfg.enabled{format!("Availability panel enabled in <#{}>. One read-only channel shows a single live embed with the cover, Online, Offline, Gaming, and On VC. Live changes refresh within about five seconds, subject to Discord rate limits. Re-running reuses tracked resources; invisible users appear Offline.",cfg.boards.first().map(|board|board.channel).ok_or_else(|| crate::errors::user("Missing availability channel"))?)}else{"Availability updates paused; channels remain.".into()}).await,Err(error)=>reply(ctx,format!("**Availability setup could not be completed**\n{}",crate::errors::with_reference(error.as_ref(),"availibilty-panel",ctx.id()))).await}
 }
 
 #[cfg(test)]

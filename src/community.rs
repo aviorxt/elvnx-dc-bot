@@ -91,11 +91,11 @@ async fn channel_management(
 ) -> Result<(), Error> {
     let value = value.unwrap_or_default();
     if value.chars().count() > 1000 {
-        return Err("Value too long".into());
+        return Err(crate::errors::user("Value too long"));
     }
     if matches!(action, ChannelAction::CreateText) {
         if value.is_empty() || value.len() > 80 {
-            return Err("Channel name must be 1–80 bytes".into());
+            return Err(crate::errors::user("Channel name must be 1–80 bytes"));
         }
         let ch = ctx
             .data()
@@ -107,12 +107,12 @@ async fn channel_management(
             .await?;
         return audit(ctx, 0, "channel-create", &format!("Channel {}", ch.id)).await;
     }
-    let ch = channel.ok_or("Select a channel")?;
+    let ch = channel.ok_or_else(|| crate::errors::user("Select a channel"))?;
     crate::commands::posting_channel(ctx, &ch).await?;
     match action {
         ChannelAction::Rename => {
             if value.is_empty() || value.len() > 80 {
-                return Err("Channel name must be 1–80 bytes".into());
+                return Err(crate::errors::user("Channel name must be 1–80 bytes"));
             }
             ch.id
                 .edit(ctx.http(), s::EditChannel::new().name(value))
@@ -154,19 +154,21 @@ async fn setup_number(
     let mut cfg = ctx.data().settings.read().await.clone();
     let id = if enabled {
         if std::env::var("ENABLE_MESSAGE_CONTENT").as_deref() != Ok("true") {
-            return Err("Enable Message Content Intent in Discord and ENABLE_MESSAGE_CONTENT=true before starting the counting game".into());
+            return Err(crate::errors::user(
+                "Enable Message Content Intent in Discord and ENABLE_MESSAGE_CONTENT=true before starting the counting game",
+            ));
         }
         let ch = if let Some(channel) = channel {
             channel
         } else {
-            let id = cfg
-                .counting_channel
-                .ok_or("Choose counting channel when enabling the game")?;
+            let id = cfg.counting_channel.ok_or_else(|| {
+                crate::errors::user("Choose counting channel when enabling the game")
+            })?;
             s::ChannelId::new(id)
                 .to_channel(ctx.http())
                 .await?
                 .guild()
-                .ok_or("Guild text channel required")?
+                .ok_or_else(|| crate::errors::user("Guild text channel required"))?
         };
         crate::commands::posting_channel(ctx, &ch).await?;
         let bot_id = ctx.serenity_context().cache.current_user().id;
@@ -177,7 +179,9 @@ async fn setup_number(
                 | s::Permissions::ADD_REACTIONS
                 | s::Permissions::READ_MESSAGE_HISTORY,
         ) {
-            return Err("Grant the bot Manage Messages, Add Reactions, and Read Message History in the counting channel".into());
+            return Err(crate::errors::user(
+                "Grant the bot Manage Messages, Add Reactions, and Read Message History in the counting channel",
+            ));
         }
         sqlx::query("INSERT INTO counting(guild) VALUES(?) ON CONFLICT(guild) DO NOTHING")
             .bind(ctx.data().guild.to_string())
@@ -187,7 +191,7 @@ async fn setup_number(
             .bind(ctx.data().guild.to_string())
             .fetch_one(&ctx.data().db)
             .await?;
-        ch.id.send_message(ctx.http(),s::CreateMessage::new().embed(s::CreateEmbed::new().title("ELVNX / COUNTING GAME").description(format!("Next number: **{}**. Post the next whole number; alternate users. Wrong numbers and non-number posts are deleted. Progress is preserved when toggling the game.", current + 1)).color(0x111111)).allowed_mentions(s::CreateAllowedMentions::new())).await?;
+        ch.id.send_message(ctx.http(),s::CreateMessage::new().embed(crate::emoji::embed().title("ELVNX / COUNTING GAME").description(format!("Next number: **{}**. Post the next whole number; alternate users. Wrong numbers and non-number posts are deleted. Progress is preserved when toggling the game.", current + 1)).color(0x111111)).allowed_mentions(s::CreateAllowedMentions::new())).await?;
         Some(ch.id.get())
     } else {
         cfg.counting_channel
@@ -372,7 +376,7 @@ async fn server_info(ctx: Context<'_>) -> Result<(), Error> {
     guild_only,
     rename = "join-to-create",
     required_permissions = "MANAGE_GUILD | MANAGE_CHANNELS",
-    required_bot_permissions = "MANAGE_CHANNELS | MOVE_MEMBERS",
+    required_bot_permissions = "MANAGE_CHANNELS | MOVE_MEMBERS | MANAGE_ROLES",
     default_member_permissions = "MANAGE_GUILD"
 )]
 async fn join_to_create(
@@ -381,25 +385,7 @@ async fn join_to_create(
     #[description = "Existing voice hub"] hub: Option<s::GuildChannel>,
     #[description = "Text channel for controls"] panel: Option<s::GuildChannel>,
 ) -> Result<(), Error> {
-    let (hub, panel) = if enabled {
-        let hub = hub.ok_or("Select a voice hub")?;
-        let panel = panel.ok_or("Select a control panel channel")?;
-        if hub.guild_id != ctx.data().guild || hub.kind != s::ChannelType::Voice {
-            return Err("Choose a voice channel in this guild".into());
-        }
-        crate::commands::posting_channel(ctx, &panel).await?;
-        panel.id.send_message(ctx.http(),s::CreateMessage::new().embed(s::CreateEmbed::new().title("ELVNX / VOICE CONTROL").description("Join the configured voice hub to create your room. Room owners can lock/unlock access or adjust the member limit with these buttons. Empty bot-created rooms are removed automatically.").color(0x111111)).components(vec![s::CreateActionRow::Buttons(vec![s::CreateButton::new("elvnx:voice:lock").label("Lock").style(s::ButtonStyle::Secondary),s::CreateButton::new("elvnx:voice:unlock").label("Unlock").style(s::ButtonStyle::Secondary),s::CreateButton::new("elvnx:voice:less").label("Limit −1").style(s::ButtonStyle::Secondary),s::CreateButton::new("elvnx:voice:more").label("Limit +1").style(s::ButtonStyle::Secondary)])]).allowed_mentions(s::CreateAllowedMentions::new())).await?;
-        (Some(hub.id.get()), Some(panel.id.get()))
-    } else {
-        (None, None)
-    };
-    let _guard = ctx.data().configuration_lock.lock().await;
-    let mut cfg = ctx.data().settings.read().await.clone();
-    cfg.join_to_create = hub;
-    cfg.voice_panel = panel;
-    store::save(&ctx.data().db, ctx.data().guild.get(), &cfg).await?;
-    *ctx.data().settings.write().await = cfg;
-    reply(ctx, "Join-to-create settings saved.").await
+    crate::voice_rooms::configure(ctx, enabled, hub, panel).await
 }
 /// Configure the staff log destination for supported moderation and gateway events.
 #[poise::command(
@@ -414,50 +400,12 @@ async fn log_channel(
     #[description = "Enabled"] enabled: bool,
     #[description = "Private staff log channel"] channel: Option<s::GuildChannel>,
 ) -> Result<(), Error> {
-    let id = if enabled {
-        let channel = channel.ok_or("Select a private log channel")?;
-        crate::commands::posting_channel(ctx, &channel).await?;
-        Some(channel.id.get())
-    } else {
-        None
-    };
-    let _guard = ctx.data().configuration_lock.lock().await;
-    let mut cfg = ctx.data().settings.read().await.clone();
-    cfg.log_channel = id;
-    store::save(&ctx.data().db, ctx.data().guild.get(), &cfg).await?;
-    *ctx.data().settings.write().await = cfg;
-    reply(ctx,"Log destination saved. Edits/deletions include cached text and attachment links. Uncached history and deleting actors may be unavailable. Restrict this channel to trusted staff.").await
+    crate::eventlog::configure(ctx, enabled, channel).await
 }
 
 pub async fn gateway(ctx: &s::Context, event: &s::FullEvent, data: &Data) -> Result<bool, Error> {
     let cfg = data.settings.read().await.clone();
     match event {
-        s::FullEvent::GuildCreate { guild, .. } if guild.id == data.guild => {
-            let _guard = data.configuration_lock.lock().await;
-            let channels: Vec<String> =
-                sqlx::query_scalar("SELECT channel FROM voice_rooms WHERE guild=?")
-                    .bind(data.guild.to_string())
-                    .fetch_all(&data.db)
-                    .await?;
-            for raw in channels {
-                let channel = s::ChannelId::new(raw.parse()?);
-                if guild
-                    .voice_states
-                    .values()
-                    .any(|v| v.channel_id == Some(channel))
-                {
-                    continue;
-                }
-                let missing = !guild.channels.contains_key(&channel);
-                if missing || channel.delete(&ctx.http).await.is_ok() {
-                    sqlx::query("DELETE FROM voice_rooms WHERE guild=? AND channel=?")
-                        .bind(data.guild.to_string())
-                        .bind(raw)
-                        .execute(&data.db)
-                        .await?;
-                }
-            }
-        }
         s::FullEvent::Message { new_message: m }
             if m.guild_id == Some(data.guild)
                 && !m.author.bot
@@ -473,118 +421,11 @@ pub async fn gateway(ctx: &s::Context, event: &s::FullEvent, data: &Data) -> Res
                 false
             };
             if accepted {
-                let _ = m
-                    .react(&ctx.http, s::ReactionType::Unicode("✅".into()))
-                    .await;
+                let _ = m.react(&ctx.http, crate::emoji::reaction("check")?).await;
             } else {
                 m.delete(&ctx.http).await?;
             }
             return Ok(true);
-        }
-        s::FullEvent::VoiceStateUpdate { old, new } if new.guild_id == Some(data.guild) => {
-            if cfg.join_to_create == new.channel_id.map(|id| id.get())
-                && cfg.join_to_create.is_some()
-            {
-                let _guard = data.configuration_lock.lock().await;
-                let member = data.guild.member(&ctx.http, new.user_id).await?;
-                if member.user.bot {
-                    return Ok(false);
-                }
-                let existing: Option<String> = sqlx::query_scalar(
-                    "SELECT channel FROM voice_rooms WHERE guild=? AND owner=? LIMIT 1",
-                )
-                .bind(data.guild.to_string())
-                .bind(new.user_id.to_string())
-                .fetch_optional(&data.db)
-                .await?;
-                if let Some(channel) = existing {
-                    member
-                        .move_to_voice_channel(&ctx.http, s::ChannelId::new(channel.parse()?))
-                        .await?;
-                } else {
-                    let hub = new
-                        .channel_id
-                        .ok_or("Missing hub")?
-                        .to_channel(&ctx.http)
-                        .await?
-                        .guild()
-                        .ok_or("Guild voice hub required")?;
-                    let mut builder = s::CreateChannel::new(format!(
-                        "{}'s room",
-                        member.user.name.chars().take(60).collect::<String>()
-                    ))
-                    .kind(s::ChannelType::Voice)
-                    .permissions(hub.permission_overwrites.clone());
-                    if let Some(category) = hub.parent_id {
-                        builder = builder.category(category);
-                    }
-                    let room = data.guild.create_channel(&ctx.http, builder).await?;
-                    sqlx::query("INSERT INTO voice_rooms VALUES(?,?,?)")
-                        .bind(data.guild.to_string())
-                        .bind(room.id.to_string())
-                        .bind(new.user_id.to_string())
-                        .execute(&data.db)
-                        .await?;
-                    if let Err(error) = member.move_to_voice_channel(&ctx.http, room.id).await {
-                        room.id.delete(&ctx.http).await?;
-                        sqlx::query("DELETE FROM voice_rooms WHERE channel=?")
-                            .bind(room.id.to_string())
-                            .execute(&data.db)
-                            .await?;
-                        return Err(error.into());
-                    }
-                }
-            }
-            if let Some(channel) = old
-                .as_ref()
-                .and_then(|v| v.channel_id)
-                .filter(|id| Some(*id) != new.channel_id)
-            {
-                let _guard = data.configuration_lock.lock().await;
-                let tracked: bool = sqlx::query_scalar(
-                    "SELECT EXISTS(SELECT 1 FROM voice_rooms WHERE guild=? AND channel=?)",
-                )
-                .bind(data.guild.to_string())
-                .bind(channel.to_string())
-                .fetch_one(&data.db)
-                .await?;
-                let occupied = ctx.cache.guild(data.guild).is_none_or(|g| {
-                    g.voice_states
-                        .values()
-                        .any(|v| v.channel_id == Some(channel))
-                });
-                if tracked && !occupied {
-                    channel.delete(&ctx.http).await?;
-                    sqlx::query("DELETE FROM voice_rooms WHERE guild=? AND channel=?")
-                        .bind(data.guild.to_string())
-                        .bind(channel.to_string())
-                        .execute(&data.db)
-                        .await?;
-                }
-            }
-        }
-        s::FullEvent::InteractionCreate {
-            interaction: s::Interaction::Component(b),
-        } if b.guild_id == Some(data.guild) && b.data.custom_id.starts_with("elvnx:voice:") => {
-            b.create_response(
-                &ctx.http,
-                s::CreateInteractionResponse::Defer(
-                    s::CreateInteractionResponseMessage::new().ephemeral(true),
-                ),
-            )
-            .await?;
-            let result:Result<(),Error>=async{
-                let channel=ctx.cache.guild(data.guild).and_then(|g|g.voice_states.get(&b.user.id).and_then(|v|v.channel_id)).ok_or("Join your room first")?;
-                let owned:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM voice_rooms WHERE guild=? AND channel=? AND owner=?)").bind(data.guild.to_string()).bind(channel.to_string()).bind(b.user.id.to_string()).fetch_one(&data.db).await?;if !owned{return Err("Only the creator can manage this room".into());}
-                let ch=channel.to_channel(&ctx.http).await?.guild().ok_or("Room removed")?;
-                let action=b.data.custom_id.trim_start_matches("elvnx:voice:");
-                if action=="lock"||action=="unlock"{let everyone=s::PermissionOverwriteType::Role(s::RoleId::new(data.guild.get()));let original=ch.permission_overwrites.iter().find(|p|p.kind==everyone);let mut allow=original.map(|p|p.allow).unwrap_or_default();let mut deny=original.map(|p|p.deny).unwrap_or_default();if action=="lock"{allow.remove(s::Permissions::CONNECT);deny.insert(s::Permissions::CONNECT);}else{allow.remove(s::Permissions::CONNECT);deny.remove(s::Permissions::CONNECT);}channel.create_permission(&ctx.http,s::PermissionOverwrite{kind:everyone,allow,deny}).await?;}
-                else{let current=ch.user_limit.unwrap_or(0);let limit=if action=="less"{current.saturating_sub(1)}else if action=="more"{current.saturating_add(1).min(99)}else{return Err("Unknown room action".into());};channel.edit(&ctx.http,s::EditChannel::new().user_limit(limit)).await?;}Ok(())
-            }.await;
-            if let Err(error) = &result {
-                tracing::warn!(%error,"Voice panel action rejected");
-            }
-            b.edit_response(&ctx.http,s::EditInteractionResponse::new().content(if result.is_ok(){"Room updated."}else{"Could not update room. Join a room that you created and check the bot's permissions."})).await?;
         }
         _ => {}
     }

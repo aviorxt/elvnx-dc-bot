@@ -1,4 +1,4 @@
-use crate::{Data, serenity as s};
+use crate::{Context, Data, Error, serenity as s, store};
 use std::{
     collections::HashMap,
     time::{Duration, Instant},
@@ -91,14 +91,30 @@ fn author(snapshot: Option<&Snapshot>) -> String {
         .unwrap_or_else(|| "Unknown — not cached".into())
 }
 fn base(title: &str, description: String) -> s::CreateEmbed {
-    s::CreateEmbed::new()
+    let icon = if title.contains("VOICE") {
+        "microphone"
+    } else if title.contains("MESSAGE") {
+        "typing"
+    } else if title.contains("MEMBER") {
+        "user"
+    } else if title.contains("AUDIT") || title.contains("BAN") {
+        "shield"
+    } else {
+        "review"
+    };
+    crate::emoji::embed_for(icon)
         .title(format!("ELVNX / {title}"))
         .description(clip(&description, 1800))
         .color(0x111111)
         .timestamp(s::Timestamp::now())
         .footer(s::CreateEmbedFooter::new("avrxt.dev • staff activity log"))
 }
-async fn send(ctx: &s::Context, channel: u64, embed: s::CreateEmbed, transcript: Option<String>) {
+async fn send(
+    ctx: &s::Context,
+    channel: u64,
+    embed: s::CreateEmbed,
+    transcript: Option<String>,
+) -> bool {
     let mut message = s::CreateMessage::new()
         .embed(embed)
         .allowed_mentions(s::CreateAllowedMentions::new());
@@ -113,7 +129,9 @@ async fn send(ctx: &s::Context, channel: u64, embed: s::CreateEmbed, transcript:
         .await
     {
         tracing::warn!(%error,"Activity log delivery failed");
+        return false;
     }
+    true
 }
 fn add_files(
     mut embed: s::CreateEmbed,
@@ -146,7 +164,44 @@ pub async fn handle(ctx: &s::Context, event: &s::FullEvent, data: &Data) {
         data.event_history.lock().await.messages.clear();
         return;
     };
+    let private = ctx
+        .cache
+        .guild(data.guild)
+        .and_then(|g| g.channels.get(&s::ChannelId::new(destination)).cloned())
+        .is_some_and(|c| private_channel(&c));
+    if !private {
+        data.event_history.lock().await.messages.clear();
+        return;
+    }
     let now = Instant::now();
+    if let s::FullEvent::GuildAuditLogEntryCreate { guild_id, entry } = event
+        && *guild_id == data.guild
+    {
+        let receipt =
+            sqlx::query("INSERT OR IGNORE INTO audit_receipts(guild,id,created) VALUES(?,?,?)")
+                .bind(data.guild.to_string())
+                .bind(entry.id.to_string())
+                .bind(s::Timestamp::now().unix_timestamp())
+                .execute(&data.db)
+                .await;
+        if !matches!(receipt,Ok(ref r) if r.rows_affected()==1) {
+            return;
+        }
+        let _ = sqlx::query("DELETE FROM audit_receipts WHERE created<?")
+            .bind(s::Timestamp::now().unix_timestamp() - 7 * 86400)
+            .execute(&data.db)
+            .await;
+    }
+    if let Some(embed) = server_event(event, data.guild) {
+        let delivered = send(ctx, destination, embed, None).await;
+        if !delivered && let s::FullEvent::GuildAuditLogEntryCreate { entry, .. } = event {
+            let _ = sqlx::query("DELETE FROM audit_receipts WHERE guild=? AND id=?")
+                .bind(data.guild.to_string())
+                .bind(entry.id.to_string())
+                .execute(&data.db)
+                .await;
+        }
+    }
     match event {
         s::FullEvent::Message { new_message: m }
             if m.guild_id == Some(data.guild) && m.channel_id.get() != destination =>
@@ -366,6 +421,15 @@ pub async fn handle(ctx: &s::Context, event: &s::FullEvent, data: &Data) {
             event,
         } if event.guild_id == data.guild => {
             let mut changes = Vec::new();
+            if old.pending != new.pending {
+                changes.push(format!(
+                    "Membership screening pending: {} → {}",
+                    old.pending, new.pending
+                ));
+            }
+            if old.avatar != new.avatar {
+                changes.push("Server avatar changed".into());
+            }
             if old.nick != new.nick {
                 changes.push(format!(
                     "Nickname: {} → {}",
@@ -410,13 +474,336 @@ pub async fn handle(ctx: &s::Context, event: &s::FullEvent, data: &Data) {
                 .await;
             }
         }
+        s::FullEvent::GuildMemberUpdate {
+            old_if_available: None,
+            event,
+            ..
+        } if event.guild_id == data.guild => {
+            send(ctx,destination,base("MEMBER UPDATE",format!("**Member:** <@{}> (`{}`)\nPrevious state unavailable — member was not cached. No before/after change is inferred.",event.user.id,event.user.id)).field("Current roles",clip(&event.roles.iter().map(|r|format!("<@&{r}>")).collect::<Vec<_>>().join(" "),900).chars().collect::<String>() + " ",false),None).await;
+        }
         _ => {}
+    }
+}
+
+/// Require an explicit @everyone View Channel deny. Dedicated log-reader roles remain supported.
+pub fn private_channel(channel: &s::GuildChannel) -> bool {
+    channel.kind == s::ChannelType::Text
+        && channel.permission_overwrites.iter().any(|p| {
+            p.kind == s::PermissionOverwriteType::Role(s::RoleId::new(channel.guild_id.get()))
+                && p.deny.contains(s::Permissions::VIEW_CHANNEL)
+                && !p.allow.contains(s::Permissions::VIEW_CHANNEL)
+        })
+}
+pub fn cover() -> Result<Vec<u8>, Error> {
+    crate::cards::render(
+        "ACTIVITY / AUDIT DESK",
+        "The server journal",
+        "Every action has a story. Keep the record clear.",
+        &[
+            ("MESSAGES", "Before / after".into()),
+            ("VOICE", "Sessions / state".into()),
+            ("SERVER", "Roles / access".into()),
+        ],
+        None,
+    )
+}
+
+pub async fn refresh(ctx: &s::Context, data: &Data) -> Result<(), Error> {
+    use sqlx::Row;
+    let Some(channel) = data.settings.read().await.log_channel else {
+        return Ok(());
+    };
+    let id = s::ChannelId::new(channel);
+    let fresh = id
+        .to_channel(&ctx.http)
+        .await?
+        .guild()
+        .ok_or_else(|| crate::errors::user("Log destination is not a server channel."))?;
+    if fresh.guild_id != data.guild || !private_channel(&fresh) {
+        return Err(crate::errors::user("Log destination must remain private."));
+    }
+    let row = sqlx::query("SELECT channel,message,version FROM activity_panels WHERE guild=?")
+        .bind(data.guild.to_string())
+        .fetch_optional(&data.db)
+        .await?;
+    if row.as_ref().is_some_and(|r| {
+        r.get::<String, _>("channel") == id.to_string()
+            && r.get::<String, _>("version") == env!("CARGO_PKG_VERSION")
+    }) {
+        return Ok(());
+    }
+    let guild = data.guild.to_partial_guild(&ctx.http).await?;
+    let bot_id = ctx.cache.current_user().id;
+    let bot = data.guild.member(&ctx.http, bot_id).await?;
+    let audit = guild
+        .member_permissions(&bot)
+        .contains(s::Permissions::VIEW_AUDIT_LOG);
+    let banner=base("ACTIVITY DESK", "**A clear record. A private space.**\n\nMessage edits and deletions · voice joins, moves and state · members, roles and timeouts · channel and thread changes · bans and audit events.\n\nMessage text is kept only in a bounded memory cache for up to 24 hours. Copies posted here remain until staff delete them. Uncached content and unavailable actors are labelled honestly.".into()).field("Audit attribution",if audit{"Enabled · Discord-provided actor, action and target"}else{"Unavailable · grant View Audit Log to enable actor records"},false).image("attachment://activity-desk.png");
+    let file = s::CreateAttachment::bytes(cover()?, "activity-desk.png");
+    let existing = row
+        .as_ref()
+        .filter(|r| r.get::<String, _>("channel") == id.to_string())
+        .and_then(|r| r.get::<String, _>("message").parse::<u64>().ok());
+    let message = if let Some(message) = existing {
+        let message = id.message(&ctx.http, s::MessageId::new(message)).await?;
+        if message.author.id != ctx.cache.current_user().id {
+            return Err(crate::errors::user("Log header is not owned by this bot."));
+        }
+        id.edit_message(
+            &ctx.http,
+            message.id,
+            s::EditMessage::new()
+                .embed(banner)
+                .attachments(s::EditAttachments::new().add(file))
+                .allowed_mentions(s::CreateAllowedMentions::new()),
+        )
+        .await?
+    } else {
+        id.send_message(
+            &ctx.http,
+            s::CreateMessage::new()
+                .embed(banner)
+                .add_file(file)
+                .allowed_mentions(s::CreateAllowedMentions::new()),
+        )
+        .await?
+    };
+    sqlx::query("INSERT INTO activity_panels(guild,channel,message,version) VALUES(?,?,?,?) ON CONFLICT(guild) DO UPDATE SET channel=excluded.channel,message=excluded.message,version=excluded.version").bind(data.guild.to_string()).bind(id.to_string()).bind(message.id.to_string()).bind(env!("CARGO_PKG_VERSION")).execute(&data.db).await?;
+    Ok(())
+}
+pub async fn configure(
+    ctx: Context<'_>,
+    enabled: bool,
+    channel: Option<s::GuildChannel>,
+) -> Result<(), Error> {
+    let _guard = ctx.data().configuration_lock.lock().await;
+    let id = if enabled {
+        let selected =
+            channel.ok_or_else(|| crate::errors::user("Select a private log channel."))?;
+        let fresh = selected
+            .id
+            .to_channel(ctx.http())
+            .await?
+            .guild()
+            .ok_or_else(|| crate::errors::user("Choose a server text channel."))?;
+        crate::commands::posting_channel(ctx, &fresh).await?;
+        if !private_channel(&fresh) {
+            return Err(crate::errors::user(
+                "Keep logs private: deny View Channel to @everyone, then allow your trusted staff/log-reader roles.",
+            ));
+        }
+        let guild = ctx.data().guild.to_partial_guild(ctx.http()).await?;
+        let bot = ctx
+            .data()
+            .guild
+            .member(ctx.http(), crate::bot_id(ctx))
+            .await?;
+        let needed = s::Permissions::EMBED_LINKS
+            | s::Permissions::ATTACH_FILES
+            | s::Permissions::READ_MESSAGE_HISTORY;
+        if !guild.user_permissions_in(&fresh, &bot).contains(needed) {
+            return Err(crate::errors::user(
+                "The bot needs Embed Links, Attach Files and Read Message History in the log channel.",
+            ));
+        }
+        Some(fresh.id.get())
+    } else {
+        None
+    };
+    let mut cfg = ctx.data().settings.read().await.clone();
+    cfg.log_channel = id;
+    store::save(&ctx.data().db, ctx.data().guild.get(), &cfg).await?;
+    *ctx.data().settings.write().await = cfg;
+    if enabled {
+        refresh(ctx.serenity_context(), ctx.data()).await?;
+    }
+    if !enabled {
+        ctx.data().event_history.lock().await.messages.clear();
+    }
+    crate::reply(ctx,if enabled{"Activity desk enabled. The coverage and privacy notice are posted in the selected channel. Audit records require View Audit Log; unavailable details are explicitly marked."}else{"Activity logging disabled and the message cache cleared. Existing Discord log messages remain until staff remove them."}).await
+}
+fn channel_summary(c: &s::GuildChannel) -> String {
+    clip(
+        &format!(
+            "Name: {}\nType: {:?}\nParent: {}\nTopic: {}\nNSFW: {} · Slowmode: {}s\nBitrate: {} · Capacity: {}\nPermission overrides: {}\nThread: {:?}",
+            c.name,
+            c.kind,
+            c.parent_id
+                .map(|id| id.to_string())
+                .unwrap_or_else(|| "None".into()),
+            c.topic.as_deref().unwrap_or("None"),
+            c.nsfw,
+            c.rate_limit_per_user.unwrap_or(0),
+            c.bitrate.unwrap_or(0),
+            c.user_limit.unwrap_or(0),
+            c.permission_overwrites.len(),
+            c.thread_metadata
+        ),
+        850,
+    )
+}
+fn permission_changes(old: &s::GuildChannel, new: &s::GuildChannel) -> String {
+    let mut lines = Vec::new();
+    for after in &new.permission_overwrites {
+        let before = old
+            .permission_overwrites
+            .iter()
+            .find(|p| p.kind == after.kind);
+        if before != Some(after) {
+            lines.push(format!(
+                "{:?}: allow {} → {}; deny {} → {}",
+                after.kind,
+                before.map(|p| p.allow.bits()).unwrap_or(0),
+                after.allow.bits(),
+                before.map(|p| p.deny.bits()).unwrap_or(0),
+                after.deny.bits()
+            ));
+        }
+    }
+    for before in &old.permission_overwrites {
+        if !new
+            .permission_overwrites
+            .iter()
+            .any(|p| p.kind == before.kind)
+        {
+            lines.push(format!("Removed override: {:?}", before.kind));
+        }
+    }
+    if lines.is_empty() {
+        "Unchanged".into()
+    } else {
+        clip(&lines.join("\n"), 900)
+    }
+}
+fn channel_event(
+    title: &str,
+    old: Option<&s::GuildChannel>,
+    new: &s::GuildChannel,
+) -> Option<s::CreateEmbed> {
+    if old.is_some_and(|c| {
+        channel_summary(c) == channel_summary(new)
+            && c.permission_overwrites == new.permission_overwrites
+    }) {
+        return None;
+    }
+    let mut embed = base(
+        title,
+        format!(
+            "**Channel:** <#{}> (`{}`)\nActor details appear separately when Discord supplies an audit event.",
+            new.id, new.id
+        ),
+    );
+    if let Some(old) = old {
+        embed = embed.field("Before", channel_summary(old), true).field(
+            "Permissions changed",
+            permission_changes(old, new),
+            false,
+        );
+    } else {
+        embed = embed.field("Before", "Unavailable — no cached baseline", true);
+    }
+    Some(embed.field("Current / final state", channel_summary(new), true))
+}
+fn role_summary(r: &s::Role) -> String {
+    clip(
+        &format!(
+            "Name: {}\nPermissions: {}\nFlags: {:?}\nPosition: {} · Managed: {}\nHoisted: {} · Mentionable: {}\nColor: #{:06x}",
+            r.name,
+            r.permissions.bits(),
+            r.permissions,
+            r.position,
+            r.managed,
+            r.hoist,
+            r.mentionable,
+            r.colour.0
+        ),
+        850,
+    )
+}
+fn server_event(event: &s::FullEvent, guild: s::GuildId) -> Option<s::CreateEmbed> {
+    match event {
+        s::FullEvent::GuildMemberAddition{new_member:m} if m.guild_id==guild => Some(base("MEMBER JOIN",format!("**Member:** <@{}> (`{}`)\n**Username:** {}\n**Account created:** <t:{}:F>\n**Bot:** {} · **Rules pending:** {}",m.user.id,m.user.id,m.user.name,m.user.id.created_at().unix_timestamp(),m.user.bot,m.pending))),
+        s::FullEvent::GuildMemberRemoval{guild_id,user,member_data_if_available} if *guild_id==guild => Some(base("MEMBER DEPARTURE",format!("**Member:** <@{}> (`{}`)\n**Username:** {}\n**Joined:** {}\nA departure alone does not identify a leave, kick or ban. See separate audit records where available.",user.id,user.id,user.name,member_data_if_available.as_ref().and_then(|m|m.joined_at).map(|t|format!("<t:{}:F>",t.unix_timestamp())).unwrap_or_else(||"Unavailable".into())))),
+        s::FullEvent::GuildBanAddition{guild_id,banned_user} if *guild_id==guild=>Some(base("MEMBER BAN",format!("**Member:** <@{}> (`{}`)\nBan confirmed by Discord. Actor/reason appear separately when audit data is available.",banned_user.id,banned_user.id))),
+        s::FullEvent::GuildBanRemoval{guild_id,unbanned_user} if *guild_id==guild=>Some(base("MEMBER UNBAN",format!("**Member:** <@{}> (`{}`)\nBan removed. Actor/reason appear separately when audit data is available.",unbanned_user.id,unbanned_user.id))),
+        s::FullEvent::ChannelCreate{channel} if channel.guild_id==guild=>channel_event("CHANNEL CREATE",None,channel),
+        s::FullEvent::ChannelDelete{channel,..} if channel.guild_id==guild=>channel_event("CHANNEL DELETE",None,channel),
+        s::FullEvent::ChannelUpdate{old,new} if new.guild_id==guild=>channel_event("CHANNEL UPDATE",old.as_ref(),new),
+        s::FullEvent::ThreadCreate{thread} if thread.guild_id==guild=>channel_event("THREAD CREATE",None,thread),
+        s::FullEvent::ThreadUpdate{old,new} if new.guild_id==guild=>channel_event("THREAD UPDATE",old.as_ref(),new),
+        s::FullEvent::ThreadDelete{thread,..} if thread.guild_id==guild=>Some(base("THREAD DELETE",format!("**Thread ID:** `{}`\n**Parent:** <#{}>",thread.id,thread.parent_id))),
+        s::FullEvent::GuildRoleCreate{new} if new.guild_id==guild=>Some(base("ROLE CREATE",format!("**Role:** <@&{}> (`{}`)",new.id,new.id)).field("Configuration",role_summary(new),false)),
+        s::FullEvent::GuildRoleUpdate{old_data_if_available:old,new} if new.guild_id==guild=>{
+            if old.as_ref().is_some_and(|r|role_summary(r)==role_summary(new)){return None;}
+            Some(base("ROLE UPDATE",format!("**Role:** <@&{}> (`{}`)",new.id,new.id)).field("Before",old.as_ref().map(role_summary).unwrap_or_else(||"Unavailable — no cached baseline".into()),true).field("After",role_summary(new),true))
+        },
+        s::FullEvent::GuildRoleDelete{guild_id,removed_role_id,removed_role_data_if_available} if *guild_id==guild=>Some(base("ROLE DELETE",format!("**Role ID:** `{removed_role_id}`")).field("Last known state",removed_role_data_if_available.as_ref().map(role_summary).unwrap_or_else(||"Unavailable — not cached".into()),false)),
+        s::FullEvent::GuildAuditLogEntryCreate{guild_id,entry} if *guild_id==guild=>{
+            // Do not dump arbitrary change payloads: webhook tokens/invite codes may be present.
+            let mut e=base("AUDIT RECORD",format!("**Action:** `{:?}`\n**Actor:** <@{}> (`{}`)\n**Target ID:** {}\n**Audit reference:** `{}`\n**Recorded:** <t:{}:F>",entry.action,entry.user_id,entry.user_id,entry.target_id.map(|id|format!("`{id}`")).unwrap_or_else(||"Not supplied".into()),entry.id,entry.id.created_at().unix_timestamp())).field("Reason",clip(entry.reason.as_deref().unwrap_or("Not supplied by Discord"),900),false);
+            if let Some(o)=&entry.options {e=e.field("Scope",format!("Channel: {}\nCount: {}\nMessage: {}",o.channel_id.map(|i|format!("<#{i}>")).unwrap_or_else(||"Not supplied".into()),o.count.map(|n|n.to_string()).unwrap_or_else(||"Not supplied".into()),o.message_id.map(|i|i.to_string()).unwrap_or_else(||"Not supplied".into())),false);}
+            Some(e)
+        },
+        s::FullEvent::GuildUpdate{old_data_if_available:old,new_data:new} if new.id==guild=>Some(base("SERVER UPDATE",format!("**Server ID:** `{guild}`")).field("Before",old.as_ref().map(|o|clip(&format!("Name: {}\nVerification: {:?}\nMFA: {:?}\nContent filter: {:?}\nAFK timeout: {:?}",o.name,o.verification_level,o.mfa_level,o.explicit_content_filter,o.afk_metadata),850)).unwrap_or_else(||"Unavailable — no cached baseline".into()),true).field("After",clip(&format!("Name: {}\nVerification: {:?}\nMFA: {:?}\nContent filter: {:?}\nAFK timeout: {:?}",new.name,new.verification_level,new.mfa_level,new.explicit_content_filter,new.afk_metadata),850),true)),
+        s::FullEvent::WebhookUpdate{guild_id,belongs_to_channel_id} if *guild_id==guild=>Some(base("WEBHOOK UPDATE",format!("**Channel:** <#{belongs_to_channel_id}>\nWebhook configuration changed. URLs and credentials are never copied into this log."))),
+        s::FullEvent::InviteCreate{data} if data.guild_id==Some(guild)=>Some(base("INVITE CREATE",format!("**Channel:** <#{}>\n**Creator:** {}\n**Lifetime:** {} seconds (0 = unlimited)\n**Maximum uses:** {} (0 = unlimited)\nInvite code intentionally omitted.",data.channel_id,data.inviter.as_ref().map(|u|format!("<@{}>",u.id)).unwrap_or_else(||"Unavailable".into()),data.max_age,data.max_uses))),
+        s::FullEvent::InviteDelete{data} if data.guild_id==Some(guild)=>Some(base("INVITE DELETE",format!("**Channel:** <#{}>\nInvite code intentionally omitted. Actor may appear in a separate audit record.",data.channel_id))),
+        s::FullEvent::GuildEmojisUpdate{guild_id,current_state} if *guild_id==guild=>Some(base("SERVER EMOJI UPDATE",format!("**Current emoji count:** {}\nChanges recorded separately when audit data is available.",current_state.len()))),
+        s::FullEvent::GuildStickersUpdate{guild_id,current_state} if *guild_id==guild=>Some(base("SERVER STICKER UPDATE",format!("**Current sticker count:** {}",current_state.len()))),
+        _=>None
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn log_destination_requires_explicit_everyone_deny_and_accepts_reader_role() {
+        let mut c:s::GuildChannel=serde_json::from_value(serde_json::json!({"id":"10","guild_id":"1","type":0,"name":"logs","position":0,"permission_overwrites":[]})).unwrap();
+        assert!(!private_channel(&c));
+        c.permission_overwrites.push(s::PermissionOverwrite {
+            kind: s::PermissionOverwriteType::Role(s::RoleId::new(1)),
+            allow: s::Permissions::empty(),
+            deny: s::Permissions::VIEW_CHANNEL,
+        });
+        c.permission_overwrites.push(s::PermissionOverwrite {
+            kind: s::PermissionOverwriteType::Role(s::RoleId::new(2)),
+            allow: s::Permissions::VIEW_CHANNEL,
+            deny: s::Permissions::empty(),
+        });
+        assert!(private_channel(&c));
+        c.permission_overwrites[0].deny = s::Permissions::empty();
+        assert!(!private_channel(&c));
+    }
+    #[test]
+    fn permission_change_with_same_count_is_reported_and_long_topics_fit() {
+        let old:s::GuildChannel=serde_json::from_value(serde_json::json!({"id":"10","guild_id":"1","type":0,"name":"logs","position":0,"permission_overwrites":[{"id":"1","type":0,"allow":"1024","deny":"0"}]})).unwrap();
+        let mut new = old.clone();
+        new.permission_overwrites[0].allow = s::Permissions::empty();
+        new.permission_overwrites[0].deny = s::Permissions::VIEW_CHANNEL;
+        new.topic = Some("😀".repeat(2000));
+        assert_ne!(permission_changes(&old, &new), "Unchanged");
+        let embed =
+            serde_json::to_value(channel_event("CHANNEL UPDATE", Some(&old), &new).unwrap())
+                .unwrap();
+        for f in embed["fields"].as_array().unwrap() {
+            assert!(f["value"].as_str().unwrap().encode_utf16().count() <= 1024);
+        }
+        assert!(channel_event("CHANNEL UPDATE", Some(&old), &old).is_none());
+    }
+    #[test]
+    fn invite_log_never_discloses_invite_code() {
+        let data: s::InviteDeleteEvent = serde_json::from_value(
+            serde_json::json!({"channel_id":"2","guild_id":"1","code":"SECRET-INVITE"}),
+        )
+        .unwrap();
+        let event = s::FullEvent::InviteDelete { data };
+        let rendered =
+            serde_json::to_string(&server_event(&event, s::GuildId::new(1)).unwrap()).unwrap();
+        assert!(!rendered.contains("SECRET-INVITE"));
+        assert!(server_event(&event, s::GuildId::new(3)).is_none());
+    }
     #[test]
     fn cache_evicts_oldest_and_expires_without_losing_recent_text() {
         let now = Instant::now();

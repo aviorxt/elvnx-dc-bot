@@ -8,6 +8,10 @@ pub struct Settings {
     pub report_channel: Option<u64>,
     pub birthday_channel: Option<u64>,
     pub music_dj_role: Option<u64>,
+    pub music_request_channel: Option<u64>,
+    pub music_favorite_channel: Option<u64>,
+    pub music_stay_channel: Option<u64>,
+    pub music_recaps_disabled: bool,
     pub appukuttan_legacy_channel: Option<u64>,
     pub always_react_channel: Option<u64>,
     pub afk_move_channel: Option<u64>,
@@ -50,11 +54,19 @@ pub async fn connect(url: &str) -> Result<SqlitePool, sqlx::Error> {
         "CREATE TABLE IF NOT EXISTS settings(guild TEXT PRIMARY KEY, value TEXT NOT NULL);
          CREATE TABLE IF NOT EXISTS live_status(guild TEXT PRIMARY KEY, value TEXT NOT NULL);
          CREATE TABLE IF NOT EXISTS availability(guild TEXT PRIMARY KEY, value TEXT NOT NULL);
+         CREATE TABLE IF NOT EXISTS presence_consent(guild TEXT NOT NULL,user TEXT NOT NULL,created INTEGER NOT NULL,PRIMARY KEY(guild,user));
          CREATE TABLE IF NOT EXISTS activity_optout(guild TEXT NOT NULL,user TEXT NOT NULL,PRIMARY KEY(guild,user));
          CREATE TABLE IF NOT EXISTS review_queue(report INTEGER PRIMARY KEY,guild TEXT NOT NULL,channel TEXT NOT NULL,message TEXT NOT NULL,assignee TEXT,state TEXT NOT NULL DEFAULT 'open',note TEXT NOT NULL DEFAULT '');
          CREATE TABLE IF NOT EXISTS scheduled_posts(id INTEGER PRIMARY KEY AUTOINCREMENT,guild TEXT NOT NULL,actor TEXT NOT NULL,channel TEXT NOT NULL,due INTEGER NOT NULL,text TEXT NOT NULL,filename TEXT,media BLOB,state TEXT NOT NULL DEFAULT 'pending',created INTEGER NOT NULL);
          CREATE TABLE IF NOT EXISTS community_events(id TEXT PRIMARY KEY,guild TEXT NOT NULL,actor TEXT NOT NULL,channel TEXT NOT NULL,room TEXT NOT NULL,owned INTEGER NOT NULL,due INTEGER NOT NULL,ends INTEGER NOT NULL,name TEXT NOT NULL,reminded INTEGER NOT NULL DEFAULT 0,state TEXT NOT NULL DEFAULT 'open');
          CREATE TABLE IF NOT EXISTS health_alerts(guild TEXT PRIMARY KEY,actor TEXT NOT NULL,channel TEXT NOT NULL);
+         CREATE TABLE IF NOT EXISTS honeypot_panels(guild TEXT PRIMARY KEY,channel TEXT NOT NULL,message TEXT NOT NULL,activated INTEGER NOT NULL);
+         CREATE TABLE IF NOT EXISTS honeypot_actions(guild TEXT NOT NULL,user TEXT NOT NULL,channel TEXT NOT NULL,message TEXT NOT NULL,created INTEGER NOT NULL,state TEXT NOT NULL,attempts INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(guild,user));
+         CREATE TABLE IF NOT EXISTS verification_policy(guild TEXT PRIMARY KEY,value TEXT NOT NULL);
+         CREATE TABLE IF NOT EXISTS verification_sessions(guild TEXT NOT NULL,user TEXT NOT NULL,nonce TEXT NOT NULL,answer BLOB NOT NULL,expires INTEGER NOT NULL,attempts INTEGER NOT NULL DEFAULT 0,used INTEGER NOT NULL DEFAULT 0,joined INTEGER NOT NULL,role TEXT NOT NULL,revision TEXT NOT NULL,risks TEXT NOT NULL,PRIMARY KEY(guild,user));
+         CREATE TABLE IF NOT EXISTS verification_attempts(guild TEXT NOT NULL,user TEXT NOT NULL,window INTEGER NOT NULL,count INTEGER NOT NULL,PRIMARY KEY(guild,user));
+         CREATE TABLE IF NOT EXISTS verification_requests(guild TEXT NOT NULL,user TEXT NOT NULL,role TEXT NOT NULL,revision TEXT NOT NULL,joined INTEGER NOT NULL,risks TEXT NOT NULL,created INTEGER NOT NULL,state TEXT NOT NULL DEFAULT 'pending',channel TEXT,message TEXT,PRIMARY KEY(guild,user));
+         CREATE TABLE IF NOT EXISTS verification_joins(guild TEXT NOT NULL,user TEXT NOT NULL,joined INTEGER NOT NULL,window INTEGER NOT NULL,count INTEGER NOT NULL,PRIMARY KEY(guild,user));
          CREATE TABLE IF NOT EXISTS role_panels(id INTEGER PRIMARY KEY AUTOINCREMENT,guild TEXT NOT NULL,channel TEXT NOT NULL,message TEXT,roles TEXT NOT NULL);
          CREATE TABLE IF NOT EXISTS polls(id INTEGER PRIMARY KEY AUTOINCREMENT,guild TEXT NOT NULL,owner TEXT NOT NULL,channel TEXT NOT NULL,message TEXT,question TEXT NOT NULL,options TEXT NOT NULL,due INTEGER NOT NULL,state TEXT NOT NULL DEFAULT 'open',rendered INTEGER NOT NULL DEFAULT 0);
          CREATE TABLE IF NOT EXISTS poll_votes(poll INTEGER NOT NULL,user TEXT NOT NULL,choice INTEGER NOT NULL,PRIMARY KEY(poll,user));
@@ -79,6 +91,18 @@ pub async fn connect(url: &str) -> Result<SqlitePool, sqlx::Error> {
          CREATE TABLE IF NOT EXISTS outgoing_dms(guild TEXT NOT NULL,user TEXT NOT NULL,channel TEXT NOT NULL,message TEXT PRIMARY KEY);
          CREATE TABLE IF NOT EXISTS counting(guild TEXT PRIMARY KEY,current INTEGER NOT NULL DEFAULT 0,last_user TEXT);
          CREATE TABLE IF NOT EXISTS lockdowns(guild TEXT NOT NULL,channel TEXT NOT NULL,overwrites TEXT NOT NULL,PRIMARY KEY(guild,channel));
+         CREATE TABLE IF NOT EXISTS music_favorites(guild TEXT NOT NULL,url TEXT NOT NULL,user TEXT NOT NULL,created INTEGER NOT NULL,PRIMARY KEY(guild,url));
+         CREATE TABLE IF NOT EXISTS music_favorite_panels(guild TEXT PRIMARY KEY,channel TEXT NOT NULL,message TEXT NOT NULL);
+         CREATE TABLE IF NOT EXISTS music_request_receipts(id TEXT PRIMARY KEY,created INTEGER NOT NULL);
+         CREATE TABLE IF NOT EXISTS music_request_panels(guild TEXT PRIMARY KEY,channel TEXT NOT NULL,message TEXT NOT NULL);
+         CREATE TABLE IF NOT EXISTS music_request_limits(guild TEXT NOT NULL,user TEXT NOT NULL,kind TEXT NOT NULL,last INTEGER NOT NULL,PRIMARY KEY(guild,user,kind));
+         CREATE TABLE IF NOT EXISTS activity_panels(guild TEXT PRIMARY KEY,channel TEXT NOT NULL,message TEXT NOT NULL,version TEXT NOT NULL);
+         CREATE TABLE IF NOT EXISTS audit_receipts(guild TEXT NOT NULL,id TEXT NOT NULL,created INTEGER NOT NULL,PRIMARY KEY(guild,id));
+         CREATE TABLE IF NOT EXISTS voice_room_state(channel TEXT PRIMARY KEY,guild TEXT NOT NULL,value TEXT NOT NULL);
+         CREATE TABLE IF NOT EXISTS voice_room_panels(guild TEXT PRIMARY KEY,channel TEXT NOT NULL,message TEXT NOT NULL);
+         CREATE TABLE IF NOT EXISTS voice_room_guests(guild TEXT NOT NULL,channel TEXT NOT NULL,user TEXT NOT NULL,blocked INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(guild,channel,user));
+         CREATE TABLE IF NOT EXISTS voice_room_invites(nonce TEXT PRIMARY KEY,guild TEXT NOT NULL,channel TEXT NOT NULL,owner TEXT NOT NULL,user TEXT NOT NULL,created INTEGER NOT NULL,expires INTEGER NOT NULL,state TEXT NOT NULL);
+         CREATE TABLE IF NOT EXISTS voice_room_limits(guild TEXT NOT NULL,user TEXT NOT NULL,kind TEXT NOT NULL,window INTEGER NOT NULL,count INTEGER NOT NULL,PRIMARY KEY(guild,user,kind));
          CREATE TABLE IF NOT EXISTS voice_rooms(guild TEXT NOT NULL,channel TEXT PRIMARY KEY,owner TEXT NOT NULL);"
     ).execute(&db).await?;
     Ok(db)

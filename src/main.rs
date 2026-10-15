@@ -6,18 +6,24 @@ mod cards;
 mod commands;
 mod community;
 mod daily;
+mod emoji;
+mod errors;
 mod eventlog;
 mod events;
 mod extras;
 mod features;
+mod honeypot;
 mod legacy;
 mod live_status;
 mod music;
+mod presence;
 mod rules;
 mod security;
 mod sticky;
 mod store;
 mod toolbox;
+mod verification;
+mod voice_rooms;
 
 use poise::serenity_prelude as serenity;
 use sqlx::SqlitePool;
@@ -33,7 +39,7 @@ struct Data {
     db: SqlitePool,
     guild: serenity::GuildId,
     settings: RwLock<store::Settings>,
-    configuration_lock: Mutex<()>,
+    configuration_lock: Arc<Mutex<()>>,
     spam: Mutex<HashMap<u64, Vec<std::time::Instant>>>,
     started: std::time::Instant,
     stickies: Arc<sticky::Service>,
@@ -45,13 +51,14 @@ struct Data {
     afk: Arc<afk::Service>,
     live_status: Arc<live_status::Service>,
     availability: Arc<availability::Service>,
+    presence: Arc<presence::Service>,
 }
 
 async fn reply(ctx: Context<'_>, text: impl Into<String>) -> Result<(), Error> {
     ctx.send(
         poise::CreateReply::default()
             .embed(
-                serenity::CreateEmbed::new()
+                crate::emoji::embed_for(crate::emoji::command_icon(&ctx.command().name))
                     .title("ELVNX / 11X")
                     .description(text.into())
                     .color(0x111111)
@@ -69,8 +76,17 @@ async fn reply(ctx: Context<'_>, text: impl Into<String>) -> Result<(), Error> {
 async fn log(http: &serenity::Http, data: &Data, text: String) {
     let channel = data.settings.read().await.log_channel;
     if let Some(channel) = channel {
-        let embed = serenity::CreateEmbed::new()
-            .title("ELVNX • moderation log")
+        let Ok(serenity::Channel::Guild(fresh)) =
+            serenity::ChannelId::new(channel).to_channel(http).await
+        else {
+            return;
+        };
+        if fresh.guild_id != data.guild || !eventlog::private_channel(&fresh) {
+            return;
+        }
+        let text = text.chars().take(1800).collect::<String>();
+        let embed = crate::emoji::embed_for("review")
+            .title("ELVNX / MODERATION CASE")
             .description(text)
             .color(0x111111)
             .timestamp(serenity::Timestamp::now());
@@ -140,6 +156,50 @@ async fn main() -> Result<(), Error> {
     let db = store::connect(&url).await?;
     if std::env::args().any(|a| a == "--preview") {
         std::fs::create_dir_all("previews")?;
+        std::fs::write("previews/voice-lounge.png", voice_rooms::cover()?)?;
+        std::fs::write("previews/activity-desk.png", eventlog::cover()?)?;
+        std::fs::write("previews/listening-room.png", music::preview()?)?;
+        std::fs::write("previews/honeypot.png", honeypot::cover()?)?;
+        std::fs::write(
+            "previews/access-approved.png",
+            cards::render(
+                "ACCESS / APPROVED",
+                "AVIOR",
+                "Your next chapter starts here.",
+                &[
+                    ("VERIFIED", "Staff approved".into()),
+                    ("ACCESS", "Unlocked".into()),
+                ],
+                None,
+            )?,
+        )?;
+        std::fs::write(
+            "previews/verification.png",
+            cards::render(
+                "ACCESS / VERIFIED",
+                "ELVNX / 11X",
+                "Read the rules. Complete your access check.",
+                &[
+                    ("ACCOUNT", "7+ days".into()),
+                    ("JOIN WAIT", "10 min".into()),
+                    ("PROTECTION", "Code + review".into()),
+                ],
+                None,
+            )?,
+        )?;
+        std::fs::write(
+            "previews/access-code.png",
+            cards::render(
+                "ONE-TIME ACCESS CODE",
+                "ABC234",
+                "Enter this code within two minutes.",
+                &[
+                    ("EXPIRES", "2 minutes".into()),
+                    ("ATTEMPTS", "3 attempts".into()),
+                ],
+                None,
+            )?,
+        )?;
         std::fs::write(
             "previews/event-cover.png",
             cards::render(
@@ -267,10 +327,10 @@ async fn main() -> Result<(), Error> {
         return Ok(());
     }
     let token = std::env::var("DISCORD_TOKEN")
-        .map_err(|_| "Set DISCORD_TOKEN in the ignored .env file.")?;
+        .map_err(|_| crate::errors::user("Set DISCORD_TOKEN in the ignored .env file."))?;
     let guild = serenity::GuildId::new(
         std::env::var("DISCORD_GUILD_ID")
-            .map_err(|_| "Set DISCORD_GUILD_ID.")?
+            .map_err(|_| crate::errors::user("Set DISCORD_GUILD_ID."))?
             .parse()?,
     );
     let settings = store::settings(&db, guild.get()).await?;
@@ -278,6 +338,9 @@ async fn main() -> Result<(), Error> {
     let mut intents = serenity::GatewayIntents::GUILDS
         | serenity::GatewayIntents::GUILD_MESSAGES
         | serenity::GatewayIntents::GUILD_MODERATION
+        | serenity::GatewayIntents::GUILD_INVITES
+        | serenity::GatewayIntents::GUILD_WEBHOOKS
+        | serenity::GatewayIntents::GUILD_EMOJIS_AND_STICKERS
         | serenity::GatewayIntents::GUILD_VOICE_STATES;
     if std::env::var("ENABLE_MESSAGE_CONTENT").as_deref() == Ok("true") {
         intents |= serenity::GatewayIntents::MESSAGE_CONTENT;
@@ -297,22 +360,14 @@ async fn main() -> Result<(), Error> {
             }
         }),
         command_check:Some(|ctx|Box::pin(async move { Ok(ctx.guild_id()==Some(ctx.data().guild)) })),
-        on_error:|error|Box::pin(async move {
-            match error {
-                poise::FrameworkError::Command {error,ctx,..} => {
-                    tracing::warn!(%error,command=%ctx.command().name,"Command failed");
-                    let _=reply(ctx,"Request failed. Check your permissions, role hierarchy, and command inputs. A moderator can inspect the bot's local logs.").await;
-                }
-                other=>{let _=poise::builtins::on_error(other).await;}
-            }
-        }),
+        on_error:|error|Box::pin(errors::on_error(error)),
         event_handler:|framework,event|Box::pin(events::handle(framework.serenity_context,event,framework,framework.user_data)),
         ..Default::default()
     }).setup(move|ctx,ready,framework|Box::pin(async move {
         if std::env::var("REGISTER_COMMANDS").as_deref()==Ok("true") {
-            poise::builtins::register_in_guild(ctx,&framework.options().commands,guild).await?;
-            // This bot is guild-only; remove obsolete global registrations from earlier versions.
-            serenity::Command::set_global_commands(ctx,Vec::new()).await?;
+            let (guild_commands,global_commands)=commands::registration(&framework.options().commands);
+            guild.set_commands(ctx,guild_commands).await?;
+            serenity::Command::set_global_commands(ctx,global_commands).await?;
         }
         tracing::info!(bot=%ready.user.name,guild=%guild,commands=music::COMMAND_COUNT,"ELVNX connected");
         let music=music::Service::start(ctx.clone(),db.clone(),guild,ready.user.id)?;
@@ -320,11 +375,13 @@ async fn main() -> Result<(), Error> {
         let started = std::time::Instant::now();
         let live_status = live_status::Service::start(ctx.clone(), db.clone(), guild, Arc::clone(framework.shard_manager()), music.clone(), started).await?;
         let availability=availability::Service::start(ctx.clone(),db.clone(),guild).await?;
-        let data=Data {db,guild,settings:RwLock::new(settings),configuration_lock:Mutex::new(()),spam:Mutex::new(HashMap::new()),started,stickies,voices:Arc::new(Mutex::new(HashMap::new())),nuke:Mutex::new(HashMap::new()),rules:RwLock::new(automod::Rules::load()?),event_history:Mutex::new(eventlog::Cache::default()),music,afk,live_status,availability};
+        let presence=presence::Service::start(db.clone(),guild,Arc::clone(&availability)).await?;
+        let data=Data {db,guild,settings:RwLock::new(settings),configuration_lock:Arc::new(Mutex::new(())),spam:Mutex::new(HashMap::new()),started,stickies,voices:Arc::new(Mutex::new(HashMap::new())),nuke:Mutex::new(HashMap::new()),rules:RwLock::new(automod::Rules::load()?),event_history:Mutex::new(eventlog::Cache::default()),music,afk,live_status,availability,presence};
         extras::presence(ctx,&*data.settings.read().await);
         extras::start_scheduler(ctx.http.clone(),data.db.clone(),guild,data.voices.clone());
         features::start(ctx.clone(),data.db.clone(),guild);
         toolbox::start(ctx.clone(),data.db.clone(),guild,data.music.clone(),Arc::clone(framework.shard_manager()));
+        voice_rooms::start(ctx.clone(),data.db.clone(),guild,Arc::clone(&data.configuration_lock));
         Ok(data)
     })).build();
     let mut client = serenity::ClientBuilder::new(token, intents)

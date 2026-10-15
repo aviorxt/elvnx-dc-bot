@@ -1,6 +1,6 @@
 # ELVNX / 11X Discord bot
 
-A standalone Rust moderation and music bot for ELVNX-PVT, using Poise/Serenity, SQLite, and a private Lavalink node. The AVRXT website is a separate project. This version has 100 top-level slash commands. See deploy/README.md for the Ubuntu VPS setup. A dedicated Discord token and server invitation are required for live operation.
+A standalone Rust moderation and music bot for ELVNX-PVT, using Poise/Serenity, SQLite, and a private Lavalink node. The AVRXT website is a separate project. This version has 100 guild slash commands plus server-context global /24-7 and /presence commands. See deploy/README.md for the Ubuntu VPS setup. A dedicated Discord token and server invitation are required for live operation.
 
 ## Commands
 
@@ -30,7 +30,7 @@ See [FEATURES.md](FEATURES.md) for settings panels, public role panels, polls, r
 
 `/quote` selects an original ELVNX community quote from a local collection; it does not copy unattributed quotes from random third-party APIs. `/quote-daily` posts at **08:00 Asia/Kolkata (02:30 UTC)** with a five-minute delivery window. The scheduler stores a durable per-day claim before sending to avoid duplicate posts across restarts. It does not send late catch-up posts, and a crash/ambiguous network failure after claiming can leave that day's quote unsent; the database marks failures for operator review.
 
-`/verify` posts an embed and button for rules acknowledgement. The role must have no global permission grants, be below the bot, and be explicitly confirmed as access available to every member. This is not CAPTCHA, real-world identity verification, or an anti-alt guarantee. Old panels stop working after a different whitelist role is configured. Permissions are rechecked on every click.
+`/verify` posts a one-time visual challenge and accessible Staff help panel. Fresh account-age, join/rejoin and native membership checks gate the zero-permission whitelist role; flagged accounts require a private staff decision. This is screening, not identity proof or guaranteed alt detection. See deploy/VERIFICATION.md.
 
 `/welcome-setup` saves welcome text and enables custom 850×470 PNG cards with the joining user's Discord avatar, matching the site's black/white palette with hand-drawn borders, stars, arrows, dotted texture, and handwritten accents. Space Grotesk, IBM Plex Mono, and Kalam are bundled under SIL Open Font Licenses so Linux rendering does not depend on installed desktop fonts. Avatar HTTP requests are HTTPS-only, limited to Discord CDN hosts, have redirects disabled, a five-second timeout, and a one-megabyte response cap. SVG user text is escaped before rendering. A missing avatar falls back to the brand layout. `cargo run -- --preview` renders sample cards into previews/ without connecting to Discord; sample totals are illustrative.
 
@@ -132,4 +132,25 @@ Use /send-attachement channel:DESTINATION file:UPLOAD caption:OPTIONAL to post a
 
 New tools: /media-panel, /schedule-post, /event, /mod-review, /server-health, /privacy. Reports now support an Appeal choice and persistent staff review buttons. Use /help search:WORD to find commands and /help check_command:COMMAND channel:CHANNEL for permission diagnostics. Search/diagnostics share /help to stay within Discord's 100-command limit. See deploy/TOOLBOX.md for examples, permissions, scheduling, retention and alert setup. Automatic posting and alerts require explicit setup.
 
-Release versions follow Semantic Versioning: MAJOR.MINOR.PATCH. Current feature release: 0.2.0. Public build identifiers use 0.2.0+build.YYYYMMDD.HHMMSS with a UTC calendar timestamp. /version and --version show the same compiled identifier. See deploy/VERSION.md for release numbering and reproducible builds.
+Release versions follow Semantic Versioning: MAJOR.MINOR.PATCH. Current release: 0.5.0. Public build identifiers use 0.5.0+build.YYYYMMDD.HHMMSS with a UTC calendar timestamp. /version and --version show the same compiled identifier. See deploy/VERSION.md for release numbering and reproducible builds.
+
+All commands now use shared actionable error handling: expected validation messages are preserved, permission/cooldown/resource/service errors explain next steps, and unexpected failures provide a private support reference. Forms and panels share the safe error mapper. See deploy/ERROR-HANDLING.md. Introduced in patch release 0.2.1.
+
+### Plain text and embed messages
+
+/say embed:false message:TEXT channel:CHANNEL posts plain text; embed:true posts the matching ELVNX embed. /dm embed:false message:TEXT member:MEMBER supports the same embed option. The embed choice is required and appears first, followed by message and then destination/recipient. Both commands require Manage Server and disable mentions. /say checks destination access, with Embed Links required only for embed:true. /dm sends to one current human server member, keeps the moderator's name out of the delivered message, and retains outgoing message IDs for /dm-clear without storing DM content. Maximum text length is 2000 UTF-16 units. Closed DMs receive the specific privacy-settings response. Current release: 0.5.0.
+
+## Verification and custom UI
+
+Verification now uses expiring one-time image challenges, account-age/rejoin/surge screening and private staff review, with an accessible manual alternative. See [VERIFICATION.md](deploy/VERIFICATION.md) for setup, permissions, limitations and retention. The bot uses 40 original animated application-owned custom emoji throughout its messages and controls; see [EMOJIS.md](deploy/EMOJIS.md).
+
+
+Premium motion release: actual animated glyphs and context-specific message icons, consistent branded footers/timestamps, staff approval DMs with personal cards, and an upgraded dedicated honeypot with guarded softban recovery. See deploy/EMOJIS.md, deploy/VERIFICATION.md and deploy/HONEYPOT.md. No historical messages or previously verified members are bulk-notified.
+
+Voice lounge permissions, owner controls and expiring invitations: [deploy/VOICE-LOUNGE.md](deploy/VOICE-LOUNGE.md). Private premium activity desk and event coverage: [deploy/LOGGING.md](deploy/LOGGING.md).
+
+Premium music controls and Listening Room design: [deploy/MUSIC-PANEL.md](deploy/MUSIC-PANEL.md).
+
+Music requests, session recaps, shared favorites and 24/7 voice: [deploy/MUSIC-COMMUNITY.md](deploy/MUSIC-COMMUNITY.md).
+
+Opt-in live presence REST/WebSocket API: [deploy/PRESENCE.md](deploy/PRESENCE.md).

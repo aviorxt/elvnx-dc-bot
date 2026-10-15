@@ -31,13 +31,17 @@ pub async fn always_react(
 ) -> Result<(), Error> {
     let id = if enabled.unwrap_or(true) {
         if std::env::var("ENABLE_MESSAGE_CONTENT").as_deref() != Ok("true") {
-            return Err("Enable Message Content Intent and ENABLE_MESSAGE_CONTENT=true so the bot can reliably read role mentions".into());
+            return Err(crate::errors::user(
+                "Enable Message Content Intent and ENABLE_MESSAGE_CONTENT=true so the bot can reliably read role mentions",
+            ));
         }
-        let channel = channel.ok_or("Select a channel to watch")?;
+        let channel = channel.ok_or_else(|| crate::errors::user("Select a channel to watch"))?;
         crate::commands::posting_channel(ctx, &channel).await?;
         let guild = ctx.data().guild.to_partial_guild(ctx.http()).await?;
         if !guild.roles.contains_key(&s::RoleId::new(ROLE)) {
-            return Err("The configured role no longer exists in this server".into());
+            return Err(crate::errors::user(
+                "The configured role no longer exists in this server",
+            ));
         }
         let bot_id = ctx.serenity_context().cache.current_user().id;
         let bot = ctx.data().guild.member(ctx.http(), bot_id).await?;
@@ -46,7 +50,9 @@ pub async fn always_react(
                 | s::Permissions::ADD_REACTIONS
                 | s::Permissions::READ_MESSAGE_HISTORY,
         ) {
-            return Err("Grant the bot View Channel, Read Message History, and Add Reactions in this channel".into());
+            return Err(crate::errors::user(
+                "Grant the bot View Channel, Read Message History, and Add Reactions in this channel",
+            ));
         }
         Some(channel.id.get())
     } else {
@@ -57,7 +63,7 @@ pub async fn always_react(
     cfg.always_react_channel = id;
     store::save(&ctx.data().db, ctx.data().guild.get(), &cfg).await?;
     *ctx.data().settings.write().await = cfg;
-    reply(ctx, id.map(|id| format!("Always-react enabled in <#{id}>. Human messages mentioning <@&{ROLE}> receive ✅. Bot and webhook messages are ignored.")).unwrap_or_else(|| "Always-react disabled.".into())).await
+    reply(ctx, id.map(|id| format!("Always-react enabled in <#{id}>. Human messages mentioning <@&{ROLE}> receive {}. Bot and webhook messages are ignored.", crate::emoji::text("check"))).unwrap_or_else(|| "Always-react disabled.".into())).await
 }
 pub async fn message(ctx: &s::Context, data: &Data, message: &s::Message) -> Result<(), Error> {
     let channel = data.settings.read().await.always_react_channel;
@@ -71,7 +77,7 @@ pub async fn message(ctx: &s::Context, data: &Data, message: &s::Message) -> Res
         &message.mention_roles,
     ) {
         message
-            .react(&ctx.http, s::ReactionType::Unicode("✅".into()))
+            .react(&ctx.http, crate::emoji::reaction("check")?)
             .await?;
     }
     Ok(())

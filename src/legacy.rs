@@ -17,7 +17,8 @@ pub async fn appukuttan_legacy(
     #[description = "Enable (default) or disable"] enabled: Option<bool>,
 ) -> Result<(), Error> {
     let id = if enabled.unwrap_or(true) {
-        let channel = channel.ok_or("Select the announcement text channel")?;
+        let channel =
+            channel.ok_or_else(|| crate::errors::user("Select the announcement text channel"))?;
         crate::commands::posting_channel(ctx, &channel).await?;
         Some(channel.id.get())
     } else {

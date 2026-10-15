@@ -27,7 +27,8 @@ fn now() -> i64 {
     s::Timestamp::now().unix_timestamp()
 }
 fn ist(time: i64) -> Result<chrono::DateTime<chrono::Utc>, Error> {
-    chrono::DateTime::from_timestamp(time + 19_800, 0).ok_or_else(|| "Invalid date".into())
+    chrono::DateTime::from_timestamp(time + 19_800, 0)
+        .ok_or_else(|| crate::errors::user("Invalid date"))
 }
 pub(crate) fn due(value: &str, time: i64) -> Result<i64, Error> {
     let value = value.trim();
@@ -42,8 +43,12 @@ pub(crate) fn due(value: &str, time: i64) -> Result<i64, Error> {
             'h' => 3600,
             _ => 86400,
         };
-        time.checked_add(amount.checked_mul(scale).ok_or("Time too large")?)
-            .ok_or("Time too large")?
+        time.checked_add(
+            amount
+                .checked_mul(scale)
+                .ok_or_else(|| crate::errors::user("Time too large"))?,
+        )
+        .ok_or_else(|| crate::errors::user("Time too large"))?
     } else {
         NaiveDateTime::parse_from_str(value, "%Y-%m-%d %H:%M")?
             .and_utc()
@@ -51,23 +56,25 @@ pub(crate) fn due(value: &str, time: i64) -> Result<i64, Error> {
             - 19_800
     };
     if result <= time || result > time + 365 * 86400 {
-        return Err(
-            "Choose a future time within 365 days: 10m, 2h, 1d, or YYYY-MM-DD HH:MM IST".into(),
-        );
+        return Err(crate::errors::user(
+            "Choose a future time within 365 days: 10m, 2h, 1d, or YYYY-MM-DD HH:MM IST",
+        ));
     }
     Ok(result)
 }
 fn bounded(value: &str, max: usize) -> Result<&str, Error> {
     let value = value.trim();
     if value.is_empty() || value.chars().count() > max {
-        return Err(format!("Text must contain 1–{max} characters").into());
+        return Err(crate::errors::user(format!(
+            "Text must contain 1–{max} characters"
+        )));
     }
     Ok(value)
 }
 fn positive_id(raw: &str) -> Result<u64, Error> {
     let value = raw.trim().parse::<u64>()?;
     if value == 0 {
-        return Err("Discord IDs must be positive".into());
+        return Err(crate::errors::user("Discord IDs must be positive"));
     }
     Ok(value)
 }
@@ -78,7 +85,7 @@ fn private_channel(channel: &s::GuildChannel, guild: s::GuildId) -> bool {
     })
 }
 fn embed(title: &str, text: impl Into<String>) -> s::CreateEmbed {
-    s::CreateEmbed::new()
+    crate::emoji::named(title)
         .title(format!("ELVNX / {title}"))
         .description(text)
         .color(0x111111)
@@ -92,7 +99,9 @@ async fn member_permissions(
     let guild = data.guild.to_partial_guild(&ctx.http).await?;
     let member = data.guild.member(&ctx.http, user).await?;
     if member.user.bot || !guild.member_permissions(&member).contains(required) {
-        return Err("You no longer have the required server permission".into());
+        return Err(crate::errors::user(
+            "You no longer have the required server permission",
+        ));
     }
     Ok((guild, member))
 }
@@ -107,7 +116,7 @@ async fn destination(
         .to_channel(&ctx.http)
         .await?
         .guild()
-        .ok_or("Server channel required")?;
+        .ok_or_else(|| crate::errors::user("Server channel required"))?;
     if channel.guild_id != guild
         || channel.kind
             != if voice {
@@ -116,7 +125,9 @@ async fn destination(
                 s::ChannelType::Text
             }
     {
-        return Err("Choose the correct channel type in this server".into());
+        return Err(crate::errors::user(
+            "Choose the correct channel type in this server",
+        ));
     }
     let partial = guild.to_partial_guild(&ctx.http).await?;
     let actor = guild.member(&ctx.http, user).await?;
@@ -139,9 +150,9 @@ async fn destination(
             .user_permissions_in(&channel, &bot)
             .contains(bot_need)
     {
-        return Err(
-            "You and the bot need destination access and the required channel permissions".into(),
-        );
+        return Err(crate::errors::user(
+            "You and the bot need destination access and the required channel permissions",
+        ));
     }
     Ok(channel)
 }
@@ -160,7 +171,9 @@ pub(crate) async fn private_reports(
         o.kind == s::PermissionOverwriteType::Role(s::RoleId::new(guild.get()))
             && o.deny.contains(s::Permissions::VIEW_CHANNEL)
     }) {
-        return Err("Reports require a private staff channel that explicitly denies View Channel to everyone".into());
+        return Err(crate::errors::user(
+            "Reports require a private staff channel that explicitly denies View Channel to everyone",
+        ));
     }
     for overwrite in &channel.permission_overwrites {
         if !overwrite.allow.contains(s::Permissions::VIEW_CHANNEL) {
@@ -177,13 +190,17 @@ pub(crate) async fn private_reports(
                         .get(&id)
                         .map(|r| r.name.as_str())
                         .unwrap_or("unknown role");
-                    return Err(format!("This channel allows the non-staff role **{name}** to view reports. Use /setup-report without a channel to create a private staff destination, or select a channel restricted to administrators and moderators.").into());
+                    return Err(crate::errors::user(format!(
+                        "This channel allows the non-staff role **{name}** to view reports. Use /setup-report without a channel to create a private staff destination, or select a channel restricted to administrators and moderators."
+                    )));
                 }
             }
             s::PermissionOverwriteType::Member(id) if id != bot && id != partial.owner_id => {
                 let member = guild.member(&ctx.http, id).await?;
                 if !partial.member_permissions(&member).intersects(staff) {
-                    return Err("Report channel grants access to a non-staff member".into());
+                    return Err(crate::errors::user(
+                        "Report channel grants access to a non-staff member",
+                    ));
                 }
             }
             _ => {}
@@ -192,11 +209,22 @@ pub(crate) async fn private_reports(
     Ok(())
 }
 async fn safe_claim_role(ctx: &s::Context, data: &Data, role: s::RoleId) -> Result<s::Role, Error> {
+    if crate::verification::reserved(data, role.get()).await? {
+        return Err(crate::errors::user(
+            "This access role requires the verification panel; it cannot be claimed through a public role panel.",
+        ));
+    }
     if !data.settings.read().await.self_roles.contains(&role.get()) {
-        return Err("This role is no longer approved for public self-service".into());
+        return Err(crate::errors::user(
+            "This role is no longer approved for public self-service",
+        ));
     }
     let guild = data.guild.to_partial_guild(&ctx.http).await?;
-    let role = guild.roles.get(&role).ok_or("Role removed")?.clone();
+    let role = guild
+        .roles
+        .get(&role)
+        .ok_or_else(|| crate::errors::user("Role removed"))?
+        .clone();
     let bot_id = ctx.cache.current_user().id;
     let bot = data.guild.member(&ctx.http, bot_id).await?;
     let dangerous = s::Permissions::ADMINISTRATOR
@@ -223,7 +251,9 @@ async fn safe_claim_role(ctx: &s::Context, data: &Data, role: s::RoleId) -> Resu
             (i64::from(role.position), role.id.get()),
         )
     {
-        return Err("Role is no longer safe or below the bot".into());
+        return Err(crate::errors::user(
+            "Role is no longer safe or below the bot",
+        ));
     }
     Ok(role)
 }
@@ -268,7 +298,7 @@ async fn role_panel(
     let buttons = roles
         .iter()
         .map(|role| {
-            s::CreateButton::new(format!("elvnx:plus:role:{id}:{}", role.id))
+            crate::emoji::button(format!("elvnx:plus:role:{id}:{}", role.id))
                 .label(role.name.chars().take(70).collect::<String>())
                 .style(s::ButtonStyle::Secondary)
         })
@@ -329,7 +359,7 @@ fn settings_components(user: s::UserId) -> Vec<s::CreateActionRow> {
             .placeholder("Choose a setting"),
         ),
         s::CreateActionRow::Buttons(vec![
-            s::CreateButton::new(format!("elvnx:plus:refresh:{user}"))
+            crate::emoji::button(format!("elvnx:plus:refresh:{user}"))
                 .label("Refresh panel")
                 .style(s::ButtonStyle::Secondary),
         ]),
@@ -364,7 +394,7 @@ async fn setting(
 ) -> Result<(), Error> {
     member_permissions(ctx, data, user, s::Permissions::MANAGE_GUILD).await?;
     if !FEATURES.iter().any(|(k, _)| *k == key) {
-        return Err("Unknown setting".into());
+        return Err(crate::errors::user("Unknown setting"));
     }
     if key == "live" {
         member_permissions(ctx, data, user, s::Permissions::MANAGE_CHANNELS).await?;
@@ -385,7 +415,9 @@ async fn setting(
             .as_ref()
             .is_some_and(|channel| !private_channel(channel, data.guild))
     {
-        return Err("Logs require a private channel that denies View Channel to everyone".into());
+        return Err(crate::errors::user(
+            "Logs require a private channel that denies View Channel to everyone",
+        ));
     }
     let _guard = data.configuration_lock.lock().await;
     let mut cfg = data.settings.read().await.clone();
@@ -393,7 +425,7 @@ async fn setting(
     match key {
         "automod" => {
             if !cfg.automod && std::env::var("ENABLE_MESSAGE_CONTENT").as_deref() != Ok("true") {
-                return Err("Enable Message Content Intent first".into());
+                return Err(crate::errors::user("Enable Message Content Intent first"));
             }
             cfg.automod = !cfg.automod;
         }
@@ -407,21 +439,21 @@ async fn setting(
         "afk" => cfg.afk_move_channel = id,
         "react" => {
             if id.is_some() && std::env::var("ENABLE_MESSAGE_CONTENT").as_deref() != Ok("true") {
-                return Err("Enable Message Content Intent first".into());
+                return Err(crate::errors::user("Enable Message Content Intent first"));
             }
             cfg.always_react_channel = id;
         }
         "legacy" => cfg.appukuttan_legacy_channel = id,
         "insight" => {
             if id.is_some() && !cfg.activity_tracking {
-                return Err("Enable activity tracking first".into());
+                return Err(crate::errors::user("Enable activity tracking first"));
             }
             cfg.daily_insight_channel = id;
         }
         "quotes" => cfg.daily_quote_channel = id,
         "birthday" => cfg.birthday_channel = id,
         "reports" => cfg.report_channel = id,
-        _ => return Err("Unknown setting".into()),
+        _ => return Err(crate::errors::user("Unknown setting")),
     }
     store::save(&data.db, data.guild.get(), &cfg).await?;
     *data.settings.write().await = cfg.clone();
@@ -439,7 +471,7 @@ fn poll_components(id: i64, options: &[String], closed: bool) -> Vec<s::CreateAc
             .iter()
             .enumerate()
             .map(|(i, text)| {
-                s::CreateButton::new(format!("elvnx:plus:vote:{id}:{i}"))
+                crate::emoji::button(format!("elvnx:plus:vote:{id}:{i}"))
                     .label(text.chars().take(70).collect::<String>())
                     .style(s::ButtonStyle::Secondary)
                     .disabled(closed)
@@ -533,7 +565,9 @@ async fn poll(
             .len()
             != options.len()
     {
-        return Err("Use 2–5 different choices separated by |".into());
+        return Err(crate::errors::user(
+            "Use 2–5 different choices separated by |",
+        ));
     }
     let time = due(closes.as_deref().unwrap_or("1h"), now())?;
     let inserted=sqlx::query("INSERT INTO polls(guild,owner,channel,question,options,due) SELECT ?,?,?,?,?,? WHERE (SELECT COUNT(*) FROM polls WHERE guild=? AND owner=? AND state='open')<2 AND (SELECT COUNT(*) FROM polls WHERE guild=? AND state='open')<20")
@@ -579,20 +613,20 @@ async fn accessible_poll(ctx: Context<'_>, id: i64) -> Result<sqlx::sqlite::Sqli
         .bind(ctx.data().guild.to_string())
         .fetch_optional(&ctx.data().db)
         .await?
-        .ok_or("Poll not found in this server")?;
+        .ok_or_else(|| crate::errors::user("Poll not found in this server"))?;
     let channel = s::ChannelId::new(row.get::<String, _>("channel").parse()?);
     let ch = channel
         .to_channel(ctx.http())
         .await?
         .guild()
-        .ok_or("Server channel required")?;
+        .ok_or_else(|| crate::errors::user("Server channel required"))?;
     let partial = ctx.data().guild.to_partial_guild(ctx.http()).await?;
     let member = ctx.data().guild.member(ctx.http(), ctx.author().id).await?;
     if !partial
         .user_permissions_in(&ch, &member)
         .contains(s::Permissions::VIEW_CHANNEL)
     {
-        return Err("You cannot view this poll's channel".into());
+        return Err(crate::errors::user("You cannot view this poll's channel"));
     }
     Ok(row)
 }
@@ -775,7 +809,7 @@ async fn birthday(
     #[description = "Day, 1–31"] day: u32,
 ) -> Result<(), Error> {
     if NaiveDate::from_ymd_opt(2000, month, day).is_none() {
-        return Err("Invalid month/day".into());
+        return Err(crate::errors::user("Invalid month/day"));
     }
     sqlx::query("INSERT INTO birthdays VALUES(?,?,?,?) ON CONFLICT(guild,user) DO UPDATE SET month=excluded.month,day=excluded.day").bind(ctx.data().guild.to_string()).bind(ctx.author().id.to_string()).bind(month as i64).bind(day as i64).execute(&ctx.data().db).await?;
     reply(ctx,format!("Opt-in saved: {day:02}/{month:02}. Your day/month may be announced with your avatar in this server at 08:00 IST when birthday announcements are enabled. No year or age is saved. Feb 29 uses Feb 28 in non-leap years. Remove anytime with /birthday-remove.")).await
@@ -808,7 +842,11 @@ async fn birthday_setup(
     #[description = "Enable (default) or disable"] enabled: Option<bool>,
 ) -> Result<(), Error> {
     let channel = if enabled.unwrap_or(true) {
-        Some(channel.ok_or("Select the birthday channel")?.id)
+        Some(
+            channel
+                .ok_or_else(|| crate::errors::user("Select the birthday channel"))?
+                .id,
+        )
     } else {
         None
     };
@@ -855,7 +893,7 @@ async fn report(
     };
     let app = match ctx {
         poise::Context::Application(app) => app,
-        _ => return Err("Use the slash command".into()),
+        _ => return Err(crate::errors::user("Use the slash command")),
     };
     let custom = format!("elvnx-report-{}", app.interaction.id);
     app.interaction
@@ -883,29 +921,29 @@ async fn report(
         )
         .await?;
     let outcome:Result<i64,Error>=async{
-        if ctx.data().settings.read().await.report_channel!=Some(channel){return Err("Report destination changed; reopen /report".into());}
+        if ctx.data().settings.read().await.report_channel!=Some(channel){return Err(crate::errors::user("Report destination changed; reopen /report"));}
         let form=ReportForm::parse(response.data.clone()).map_err(|error|->Error{error.into()})?;
         let channel=destination(ctx.serenity_context(),guild,crate::bot_id(ctx),s::ChannelId::new(channel),false).await?;
         private_reports(ctx.serenity_context(),guild,&channel).await?;
         let reporter=guild.member(ctx.http(),user).await?;
-        if reporter.user.bot{return Err("Human reports only".into());}
+        if reporter.user.bot{return Err(crate::errors::user("Human reports only"));}
         let member=if let Some(raw)=form.member.filter(|raw|!raw.trim().is_empty()){
             let id=s::UserId::new(positive_id(&raw)?);guild.member(ctx.http(),id).await?;format!("<@{id}> (`{id}`)")
         }else{"Not specified".into()};
         if let Some(link)=&form.link && !link.trim().is_empty(){
             let url=reqwest::Url::parse(link.trim())?;
-            if url.scheme()!="https"||url.host_str()!=Some("discord.com")||!url.username().is_empty()||url.password().is_some()||url.port().is_some(){return Err("Use a https://discord.com/channels/... message link".into());}
+            if url.scheme()!="https"||url.host_str()!=Some("discord.com")||!url.username().is_empty()||url.password().is_some()||url.port().is_some(){return Err(crate::errors::user("Use a https://discord.com/channels/... message link"));}
             let parts=url.path().split('/').filter(|p|!p.is_empty()).collect::<Vec<_>>();
-            if parts.len()!=4||parts[0]!="channels"||parts[1]!=guild.to_string(){return Err("Message link must belong to this server".into());}
+            if parts.len()!=4||parts[0]!="channels"||parts[1]!=guild.to_string(){return Err(crate::errors::user("Message link must belong to this server"));}
             let ch=s::ChannelId::new(positive_id(parts[2])?);let _message=positive_id(parts[3])?;
-            let ch=ch.to_channel(ctx.http()).await?.guild().ok_or("Server channel required")?;
+            let ch=ch.to_channel(ctx.http()).await?.guild().ok_or_else(|| crate::errors::user("Server channel required"))?;
             let partial=guild.to_partial_guild(ctx.http()).await?;
-            if !partial.user_permissions_in(&ch,&reporter).contains(s::Permissions::VIEW_CHANNEL){return Err("You cannot report a message from an inaccessible channel".into());}
+            if !partial.user_permissions_in(&ch,&reporter).contains(s::Permissions::VIEW_CHANNEL){return Err(crate::errors::user("You cannot report a message from an inaccessible channel"));}
         }
         let stamp=now();
         let inserted=sqlx::query("INSERT INTO reports(guild,user,created) SELECT ?,?,? WHERE (SELECT COUNT(*) FROM reports WHERE guild=? AND user=? AND created>?)<3")
             .bind(guild.to_string()).bind(user.to_string()).bind(stamp).bind(guild.to_string()).bind(user.to_string()).bind(stamp-86400).execute(&ctx.data().db).await?;
-        if inserted.rows_affected()==0{return Err("Maximum three reports per 24 hours; contact staff directly for urgent issues".into());}
+        if inserted.rows_affected()==0{return Err(crate::errors::user("Maximum three reports per 24 hours; contact staff directly for urgent issues"));}
         let id=inserted.last_insert_rowid();
         let message=s::CreateMessage::new().embed(embed("CONFIDENTIAL REPORT",bounded(&form.details,3000)?)
             .field("Submission type",format!("{:?}",kind.unwrap_or(ReportKind::Report)),true)
@@ -925,7 +963,7 @@ async fn report(
         Ok(id) => format!(
             "Report #{id} delivered privately to staff. Thank you. Staff will review it; this does not automatically punish anyone."
         ),
-        Err(error) => error.to_string(),
+        Err(error) => crate::errors::with_reference(error.as_ref(), "report", response.id.get()),
     };
     response
         .edit_response(
@@ -973,7 +1011,10 @@ async fn report_setup(
         Err(error) => {
             reply(
                 ctx,
-                format!("**Report setup could not be completed**\n{error}"),
+                format!(
+                    "**Report setup could not be completed**\n{}",
+                    crate::errors::with_reference(error.as_ref(), "setup-report", ctx.id())
+                ),
             )
             .await
         }
@@ -1023,7 +1064,7 @@ async fn report_destination(ctx: Context<'_>) -> Result<s::ChannelId, Error> {
             .to_channel(ctx.http())
             .await?
             .guild()
-            .ok_or("Configured report channel is unavailable")?;
+            .ok_or_else(|| crate::errors::user("Configured report channel is unavailable"))?;
         private_reports(ctx.serenity_context(), ctx.data().guild, &channel).await?;
         return Ok(channel.id);
     }
@@ -1043,7 +1084,9 @@ async fn report_destination(ctx: Context<'_>) -> Result<s::ChannelId, Error> {
         .member_permissions(&bot)
         .contains(s::Permissions::MANAGE_CHANNELS)
     {
-        return Err("The bot needs Manage Channels to create member-reports".into());
+        return Err(crate::errors::user(
+            "The bot needs Manage Channels to create member-reports",
+        ));
     }
     for channel in guild
         .id
@@ -1098,14 +1141,27 @@ async fn validate_backup(ctx: Context<'_>, backup: &Backup) -> Result<(), Error>
     )
     .await?;
     if backup.version != 1 || backup.guild != ctx.data().guild.get() {
-        return Err("Backup must use format 1 and belong to this server".into());
+        return Err(crate::errors::user(
+            "Backup must use format 1 and belong to this server",
+        ));
     }
     let cfg = &backup.settings;
     let current = ctx.data().settings.read().await.clone();
+    for role in cfg.autorole.iter().chain(cfg.self_roles.iter()) {
+        if cfg.verification_role == Some(*role)
+            || crate::verification::reserved(ctx.data(), *role).await?
+        {
+            return Err(crate::errors::user(
+                "Backup cannot expose the verification role through autoroles or public self-service.",
+            ));
+        }
+    }
     if (cfg.antinuke && !current.antinuke)
         || (cfg.honeypot_channel.is_some() && cfg.honeypot_channel != current.honeypot_channel)
     {
-        return Err("Enable antinuke or a new honeypot through its dedicated confirmation command before restoring these settings".into());
+        return Err(crate::errors::user(
+            "Enable antinuke or a new honeypot through its dedicated confirmation command before restoring these settings",
+        ));
     }
     if cfg.blocked_words.len() > 50
         || cfg.blocked_words.iter().any(|w| w.len() > 60)
@@ -1135,17 +1191,21 @@ async fn validate_backup(ctx: Context<'_>, backup: &Backup) -> Result<(), Error>
         .contains(&Some(0))
         || cfg.self_roles.contains(&0)
     {
-        return Err("Backup exceeds settings limits".into());
+        return Err(crate::errors::user("Backup exceeds settings limits"));
     }
     if !["", "playing", "watching", "listening", "competing"].contains(&cfg.activity_kind.as_str())
         || !["", "active", "dnd", "sleep", "invisible"].contains(&cfg.online_status.as_str())
     {
-        return Err("Backup contains invalid presence settings".into());
+        return Err(crate::errors::user(
+            "Backup contains invalid presence settings",
+        ));
     }
     if (cfg.automod || cfg.counting_channel.is_some() || cfg.always_react_channel.is_some())
         && std::env::var("ENABLE_MESSAGE_CONTENT").as_deref() != Ok("true")
     {
-        return Err("Message Content Intent is required by this backup".into());
+        return Err(crate::errors::user(
+            "Message Content Intent is required by this backup",
+        ));
     }
     for id in [
         cfg.appukuttan_legacy_channel,
@@ -1191,9 +1251,9 @@ async fn validate_backup(ctx: Context<'_>, backup: &Backup) -> Result<(), Error>
             .to_channel(ctx.http())
             .await?
             .guild()
-            .ok_or("Invalid ticket category")?;
+            .ok_or_else(|| crate::errors::user("Invalid ticket category"))?;
         if channel.guild_id != guild.id || channel.kind != s::ChannelType::Category {
-            return Err("Invalid ticket category".into());
+            return Err(crate::errors::user("Invalid ticket category"));
         }
     }
     if let Some(id) = cfg.report_channel {
@@ -1201,7 +1261,7 @@ async fn validate_backup(ctx: Context<'_>, backup: &Backup) -> Result<(), Error>
             .to_channel(ctx.http())
             .await?
             .guild()
-            .ok_or("Report channel missing")?;
+            .ok_or_else(|| crate::errors::user("Report channel missing"))?;
         private_reports(ctx.serenity_context(), ctx.data().guild, &channel).await?;
     }
     if let Some(id) = cfg.log_channel {
@@ -1209,22 +1269,23 @@ async fn validate_backup(ctx: Context<'_>, backup: &Backup) -> Result<(), Error>
             .to_channel(ctx.http())
             .await?
             .guild()
-            .ok_or("Log channel missing")?;
+            .ok_or_else(|| crate::errors::user("Log channel missing"))?;
         if !private_channel(&channel, ctx.data().guild) {
-            return Err("Restored log channel must deny View Channel to everyone".into());
+            return Err(crate::errors::user(
+                "Restored log channel must deny View Channel to everyone",
+            ));
         }
     }
     for id in &cfg.self_roles {
         if !current.self_roles.contains(id) {
-            return Err(
-                "Reapprove restored public roles with /selfrole_allow before restoring the backup"
-                    .into(),
-            );
+            return Err(crate::errors::user(
+                "Reapprove restored public roles with /selfrole_allow before restoring the backup",
+            ));
         }
         let role = guild
             .roles
             .get(&s::RoleId::new(*id))
-            .ok_or("Restored role no longer exists")?;
+            .ok_or_else(|| crate::errors::user("Restored role no longer exists"))?;
         security::safe_role(ctx, role).await?;
     }
     for (id, approved) in [
@@ -1233,15 +1294,14 @@ async fn validate_backup(ctx: Context<'_>, backup: &Backup) -> Result<(), Error>
     ] {
         if let Some(id) = id {
             if approved != Some(id) && !current.self_roles.contains(&id) {
-                return Err(
-                    "A restored automatic/verification role must already be explicitly approved"
-                        .into(),
-                );
+                return Err(crate::errors::user(
+                    "A restored automatic/verification role must already be explicitly approved",
+                ));
             }
             let role = guild
                 .roles
                 .get(&s::RoleId::new(id))
-                .ok_or("Restored role removed")?;
+                .ok_or_else(|| crate::errors::user("Restored role removed"))?;
             security::safe_role(ctx, role).await?;
         }
     }
@@ -1254,7 +1314,7 @@ async fn validate_backup(ctx: Context<'_>, backup: &Backup) -> Result<(), Error>
             .get(&s::RoleId::new(id))
             .is_some_and(|role| !role.managed && role.id.get() != guild.id.get())
         {
-            return Err("Staff/DJ role removed".into());
+            return Err(crate::errors::user("Staff/DJ role removed"));
         }
     }
     Ok(())
@@ -1263,7 +1323,10 @@ fn differences(current: &store::Settings, next: &store::Settings) -> Result<Stri
     let current = serde_json::to_value(current)?;
     let next = serde_json::to_value(next)?;
     let mut changes = Vec::new();
-    for (key, value) in next.as_object().ok_or("Invalid settings")? {
+    for (key, value) in next
+        .as_object()
+        .ok_or_else(|| crate::errors::user("Invalid settings"))?
+    {
         if current.get(key) != Some(value) {
             changes.push(format!(
                 "**{key}**\n{} → {}",
@@ -1350,7 +1413,9 @@ async fn config_restore(
             .bind(ctx.data().guild.to_string())
             .fetch_optional(&ctx.data().db)
             .await?;
-    let backup: Backup = serde_json::from_str(&raw.ok_or("Backup not found in this server")?)?;
+    let backup: Backup = serde_json::from_str(
+        &raw.ok_or_else(|| crate::errors::user("Backup not found in this server"))?,
+    )?;
     if !confirm.unwrap_or(false) {
         return review(ctx, id, &backup).await;
     }
@@ -1411,7 +1476,9 @@ async fn config_import(
         || url.password().is_some()
         || url.port().is_some()
     {
-        return Err("Use a Discord-hosted JSON attachment no larger than 256 KiB".into());
+        return Err(crate::errors::user(
+            "Use a Discord-hosted JSON attachment no larger than 256 KiB",
+        ));
     }
     let client = reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::none())
@@ -1421,7 +1488,7 @@ async fn config_import(
     let mut bytes = Vec::new();
     while let Some(chunk) = response.chunk().await? {
         if bytes.len() + chunk.len() > 262_144 {
-            return Err("Backup too large".into());
+            return Err(crate::errors::user("Backup too large"));
         }
         bytes.extend(chunk);
     }
@@ -1470,10 +1537,10 @@ async fn click_rate(user: s::UserId, kind: &'static str) -> Result<(), Error> {
         .get(&(user.get(), kind))
         .is_some_and(|last| time.duration_since(*last) < Duration::from_secs(2))
     {
-        return Err("Wait two seconds between clicks".into());
+        return Err(crate::errors::user("Wait two seconds between clicks"));
     }
     if clicks.len() >= 1000 {
-        return Err("Controls are busy; try shortly".into());
+        return Err(crate::errors::user("Controls are busy; try shortly"));
     }
     clicks.insert((user.get(), kind), time);
     Ok(())
@@ -1526,10 +1593,10 @@ pub async fn gateway(ctx: &s::Context, event: &s::FullEvent, data: &Data) -> Res
         )
         .await?;
     let outcome:Result<(),Error>=async{
-        if button.user.bot{return Err("Human controls only".into());}
+        if button.user.bot{return Err(crate::errors::user("Human controls only"));}
         if dashboard {
-            let actor=parts.last().ok_or("Invalid panel")?.parse::<u64>()?;
-            if actor!=button.user.id.get(){return Err("This panel belongs to another staff member".into());}
+            let actor=parts.last().ok_or_else(|| crate::errors::user("Invalid panel"))?.parse::<u64>()?;
+            if actor!=button.user.id.get(){return Err(crate::errors::user("This panel belongs to another staff member"));}
             member_permissions(ctx,data,button.user.id,s::Permissions::MANAGE_GUILD).await?;
             click_rate(button.user.id,"settings").await?;
             if action=="refresh"{
@@ -1537,24 +1604,24 @@ pub async fn gateway(ctx: &s::Context, event: &s::FullEvent, data: &Data) -> Res
                 button.edit_response(&ctx.http,s::EditInteractionResponse::new().embed(settings_embed(&cfg)).components(settings_components(button.user.id))).await?;return Ok(());
             }
             if action=="settings"{
-                let s::ComponentInteractionDataKind::StringSelect{values}=&button.data.kind else{return Err("Select a setting".into());};
-                let key=values.first().ok_or("Choose one setting")?;
-                if !FEATURES.iter().any(|(k,_)|k==key){return Err("Unknown setting".into());}
+                let s::ComponentInteractionDataKind::StringSelect{values}=&button.data.kind else{return Err(crate::errors::user("Select a setting"));};
+                let key=values.first().ok_or_else(|| crate::errors::user("Choose one setting"))?;
+                if !FEATURES.iter().any(|(k,_)|k==key){return Err(crate::errors::user("Unknown setting"));}
                 if matches!(key.as_str(),"automod"|"invites"|"activity"){
                     setting(ctx,data,button.user.id,key,None,false).await?;
                     let cfg=data.settings.read().await.clone();
                     button.edit_response(&ctx.http,s::EditInteractionResponse::new().embed(settings_embed(&cfg)).components(settings_components(button.user.id))).await?;
                 }else{
-                    let mut rows=vec![s::CreateActionRow::Buttons(vec![s::CreateButton::new(format!("elvnx:plus:off:{key}:{}",button.user.id)).label("Turn off / pause").style(s::ButtonStyle::Danger)])];
+                    let mut rows=vec![s::CreateActionRow::Buttons(vec![crate::emoji::button(format!("elvnx:plus:off:{key}:{}",button.user.id)).label("Turn off / pause").style(s::ButtonStyle::Danger)])];
                     if key=="live"{
-                        rows.push(s::CreateActionRow::Buttons(vec![s::CreateButton::new(format!("elvnx:plus:channel:live:{}",button.user.id)).label("Enable / create boards").style(s::ButtonStyle::Secondary)]));
+                        rows.push(s::CreateActionRow::Buttons(vec![crate::emoji::button(format!("elvnx:plus:channel:live:{}",button.user.id)).label("Enable / create boards").style(s::ButtonStyle::Secondary)]));
                     }else{
                         rows.push(s::CreateActionRow::SelectMenu(s::CreateSelectMenu::new(format!("elvnx:plus:channel:{key}:{}",button.user.id),s::CreateSelectMenuKind::Channel{channel_types:Some(vec![if key=="afk"{s::ChannelType::Voice}else{s::ChannelType::Text}]),default_channels:None}).placeholder("Choose destination")));
                     }
                     button.edit_response(&ctx.http,s::EditInteractionResponse::new().embed(embed("SETTING DESTINATION",format!("Configure **{key}**. Reports require a private staff channel; daily insight requires activity tracking."))).components(rows)).await?;
                 }
             }else{
-                let key=parts.get(3).ok_or("Missing setting")?;
+                let key=parts.get(3).ok_or_else(|| crate::errors::user("Missing setting"))?;
                 let channel=match &button.data.kind{s::ComponentInteractionDataKind::ChannelSelect{values}=>values.first().copied(),_=>None};
                 setting(ctx,data,button.user.id,key,channel,action=="off").await?;
                 let cfg=data.settings.read().await.clone();
@@ -1564,35 +1631,35 @@ pub async fn gateway(ctx: &s::Context, event: &s::FullEvent, data: &Data) -> Res
         }
         if action=="role"{
             click_rate(button.user.id,"role").await?;
-            let id=parts.get(3).ok_or("Missing panel")?.parse::<i64>()?;
-            let role=s::RoleId::new(parts.get(4).ok_or("Missing role")?.parse()?);
-            let row=sqlx::query("SELECT channel,message,roles FROM role_panels WHERE id=? AND guild=?").bind(id).bind(data.guild.to_string()).fetch_optional(&data.db).await?.ok_or("Panel not found")?;
+            let id=parts.get(3).ok_or_else(|| crate::errors::user("Missing panel"))?.parse::<i64>()?;
+            let role=s::RoleId::new(parts.get(4).ok_or_else(|| crate::errors::user("Missing role"))?.parse()?);
+            let row=sqlx::query("SELECT channel,message,roles FROM role_panels WHERE id=? AND guild=?").bind(id).bind(data.guild.to_string()).fetch_optional(&data.db).await?.ok_or_else(|| crate::errors::user("Panel not found"))?;
             let roles:Vec<u64>=serde_json::from_str(row.get("roles"))?;
-            if row.get::<String,_>("channel")!=button.channel_id.to_string()||row.get::<Option<String>,_>("message")!=Some(button.message.id.to_string())||!roles.contains(&role.get()){return Err("Panel no longer matches the saved configuration".into());}
+            if row.get::<String,_>("channel")!=button.channel_id.to_string()||row.get::<Option<String>,_>("message")!=Some(button.message.id.to_string())||!roles.contains(&role.get()){return Err(crate::errors::user("Panel no longer matches the saved configuration"));}
             let _guard=data.configuration_lock.lock().await;
             let role=safe_claim_role(ctx,data,role).await?;
             let guild=data.guild.to_partial_guild(&ctx.http).await?;
             let member=data.guild.member(&ctx.http,button.user.id).await?;
-            let channel=button.channel_id.to_channel(&ctx.http).await?.guild().ok_or("Server channel required")?;
-            if !guild.user_permissions_in(&channel,&member).contains(s::Permissions::VIEW_CHANNEL){return Err("You cannot view this panel".into());}
+            let channel=button.channel_id.to_channel(&ctx.http).await?.guild().ok_or_else(|| crate::errors::user("Server channel required"))?;
+            if !guild.user_permissions_in(&channel,&member).contains(s::Permissions::VIEW_CHANNEL){return Err(crate::errors::user("You cannot view this panel"));}
             let remove=member.roles.contains(&role.id);
             if remove{member.remove_role(&ctx.http,role.id).await?;}else{member.add_role(&ctx.http,role.id).await?;}
             component_text(ctx,button,format!("{} role **{}**.",if remove{"Removed"}else{"Added"},role.name)).await?;
         }else if action=="vote"{
             click_rate(button.user.id,"vote").await?;
-            let id=parts.get(3).ok_or("Missing poll")?.parse::<i64>()?;
-            let choice=parts.get(4).ok_or("Missing choice")?.parse::<usize>()?;
-            let row=sqlx::query("SELECT channel,message,options,due,state FROM polls WHERE id=? AND guild=?").bind(id).bind(data.guild.to_string()).fetch_optional(&data.db).await?.ok_or("Poll not found")?;
+            let id=parts.get(3).ok_or_else(|| crate::errors::user("Missing poll"))?.parse::<i64>()?;
+            let choice=parts.get(4).ok_or_else(|| crate::errors::user("Missing choice"))?.parse::<usize>()?;
+            let row=sqlx::query("SELECT channel,message,options,due,state FROM polls WHERE id=? AND guild=?").bind(id).bind(data.guild.to_string()).fetch_optional(&data.db).await?.ok_or_else(|| crate::errors::user("Poll not found"))?;
             let options:Vec<String>=serde_json::from_str(row.get("options"))?;
-            if choice>=options.len()||row.get::<String,_>("channel")!=button.channel_id.to_string()||row.get::<Option<String>,_>("message")!=Some(button.message.id.to_string()){return Err("This poll button is outdated".into());}
+            if choice>=options.len()||row.get::<String,_>("channel")!=button.channel_id.to_string()||row.get::<Option<String>,_>("message")!=Some(button.message.id.to_string()){return Err(crate::errors::user("This poll button is outdated"));}
             let guild=data.guild.to_partial_guild(&ctx.http).await?;let member=data.guild.member(&ctx.http,button.user.id).await?;
-            let channel=button.channel_id.to_channel(&ctx.http).await?.guild().ok_or("Server channel required")?;
-            if !guild.user_permissions_in(&channel,&member).contains(s::Permissions::VIEW_CHANNEL){return Err("You cannot view this poll".into());}
+            let channel=button.channel_id.to_channel(&ctx.http).await?.guild().ok_or_else(|| crate::errors::user("Server channel required"))?;
+            if !guild.user_permissions_in(&channel,&member).contains(s::Permissions::VIEW_CHANNEL){return Err(crate::errors::user("You cannot view this poll"));}
             let changed=sqlx::query("INSERT INTO poll_votes(poll,user,choice) SELECT ?,?,? WHERE EXISTS(SELECT 1 FROM polls WHERE id=? AND guild=? AND state='open' AND due>?) ON CONFLICT(poll,user) DO UPDATE SET choice=excluded.choice")
                 .bind(id).bind(button.user.id.to_string()).bind(choice as i64).bind(id).bind(data.guild.to_string()).bind(now()).execute(&data.db).await?.rows_affected();
-            if changed==0{return Err("Poll is closed; your vote was not changed".into());}
+            if changed==0{return Err(crate::errors::user("Poll is closed; your vote was not changed"));}
             component_text(ctx,button,format!("Vote saved: **{}**. One vote per member; you can change it until closing. Counts refresh every 30 seconds.",options[choice])).await?;
-        }else{return Err("Unknown control".into());}
+        }else{return Err(crate::errors::user("Unknown control"));}
         Ok(())
     }.await;
     if let Err(error) = outcome {
@@ -1600,7 +1667,14 @@ pub async fn gateway(ctx: &s::Context, event: &s::FullEvent, data: &Data) -> Res
             .edit_response(
                 &ctx.http,
                 s::EditInteractionResponse::new()
-                    .embed(embed("ACTION NOT COMPLETED", error.to_string()))
+                    .embed(embed(
+                        "ACTION NOT COMPLETED",
+                        crate::errors::with_reference(
+                            error.as_ref(),
+                            "settings-panel",
+                            button.id.get(),
+                        ),
+                    ))
                     .components(Vec::new())
                     .allowed_mentions(s::CreateAllowedMentions::new()),
             )
@@ -1652,7 +1726,9 @@ async fn scheduled_polls(
 async fn poll_batch(db: &SqlitePool, guild: u64, cursor: &mut i64) -> Result<Vec<i64>, Error> {
     let mut closed:Vec<i64>=sqlx::query_scalar("SELECT id FROM polls WHERE guild=? AND message IS NOT NULL AND state='closed' AND rendered=0 AND id>? ORDER BY id LIMIT 20").bind(guild.to_string()).bind(*cursor).fetch_all(db).await?;
     *cursor = if closed.len() == 20 {
-        *closed.last().ok_or("Missing poll cursor")?
+        *closed
+            .last()
+            .ok_or_else(|| crate::errors::user("Missing poll cursor"))?
     } else {
         0
     };
@@ -1698,7 +1774,7 @@ async fn scheduled_reminders(
                     .member_permissions(&member)
                     .contains(s::Permissions::MANAGE_GUILD)
                 {
-                    return Err("Scheduling member is no longer staff".into());
+                    return Err(crate::errors::user("Scheduling member is no longer staff"));
                 }
                 let channel =
                     destination(ctx, guild, user, s::ChannelId::new(channel.parse()?), false)
@@ -1767,7 +1843,7 @@ async fn scheduled_birthdays(
         }
         let outcome: Result<(), Error> = async {
             let opted_in:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM birthdays WHERE guild=? AND user=? AND month=? AND day=?)").bind(guild.to_string()).bind(user.to_string()).bind(date.month() as i64).bind(day).fetch_one(db).await?;
-            if !opted_in {return Err("Birthday opt-in removed".into());}
+            if !opted_in {return Err(crate::errors::user("Birthday opt-in removed"));}
             let bot = ctx.cache.current_user().id;
             let channel = destination(ctx, guild, bot, s::ChannelId::new(channel), false).await?;
             let avatar = cards::avatar(&member.user).await;

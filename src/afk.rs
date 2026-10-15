@@ -171,9 +171,11 @@ impl Service {
             .to_channel(&ctx.http)
             .await?
             .guild()
-            .ok_or("DND destination was removed")?;
+            .ok_or_else(|| crate::errors::user("DND destination was removed"))?;
         if dest.guild_id != guild || dest.kind != s::ChannelType::Voice {
-            return Err("DND destination must remain a normal server voice channel".into());
+            return Err(crate::errors::user(
+                "DND destination must remain a normal server voice channel",
+            ));
         }
         let partial = guild.to_partial_guild(&ctx.http).await?;
         let bot_id = ctx.cache.current_user().id;
@@ -181,9 +183,9 @@ impl Service {
         if !partial.user_permissions_in(&dest, &bot).contains(
             s::Permissions::VIEW_CHANNEL | s::Permissions::CONNECT | s::Permissions::MOVE_MEMBERS,
         ) {
-            return Err(
-                "Bot needs View Channel, Connect, and Move Members in the DND channel".into(),
-            );
+            return Err(crate::errors::user(
+                "Bot needs View Channel, Connect, and Move Members in the DND channel",
+            ));
         }
         for (user, original) in candidates {
             let voice = match guild.get_user_voice_state(&ctx.http, user).await {
@@ -215,7 +217,7 @@ impl Service {
                 .to_channel(&ctx.http)
                 .await?
                 .guild()
-                .ok_or("Source voice channel unavailable")?;
+                .ok_or_else(|| crate::errors::user("Source voice channel unavailable"))?;
             if !partial
                 .user_permissions_in(&source, &bot)
                 .contains(s::Permissions::MOVE_MEMBERS)
@@ -240,7 +242,7 @@ impl Service {
                     self.tracker.lock().await.members.remove(&user);
                     let cfg = store::settings(db, guild.get()).await?;
                     if let Some(log) = cfg.log_channel {
-                        let _ = s::ChannelId::new(log).send_message(&ctx.http, s::CreateMessage::new().embed(s::CreateEmbed::new().title("ELVNX / AFK MOVE").description(format!("<@{user}> moved from <#{}> to <#{destination}> after 10 continuous minutes muted or deafened.", original.channel)).color(0x111111)).allowed_mentions(s::CreateAllowedMentions::new())).await;
+                        let _ = s::ChannelId::new(log).send_message(&ctx.http, s::CreateMessage::new().embed(crate::emoji::embed().title("ELVNX / AFK MOVE").description(format!("<@{user}> moved from <#{}> to <#{destination}> after 10 continuous minutes muted or deafened.", original.channel)).color(0x111111)).allowed_mentions(s::CreateAllowedMentions::new())).await;
                     }
                 }
                 Err(error) => {
@@ -268,9 +270,11 @@ pub async fn afk_move(
     #[description = "DND voice channel when enabling"] channel: Option<s::GuildChannel>,
 ) -> Result<(), Error> {
     let id = if enabled {
-        let dest = channel.ok_or("Select the DND voice channel")?;
+        let dest = channel.ok_or_else(|| crate::errors::user("Select the DND voice channel"))?;
         if dest.guild_id != ctx.data().guild || dest.kind != s::ChannelType::Voice {
-            return Err("Choose a normal voice channel in this server".into());
+            return Err(crate::errors::user(
+                "Choose a normal voice channel in this server",
+            ));
         }
         let partial = ctx.data().guild.to_partial_guild(ctx.http()).await?;
         let actor = ctx.data().guild.member(ctx.http(), ctx.author().id).await?;
@@ -280,14 +284,16 @@ pub async fn afk_move(
             .user_permissions_in(&dest, &actor)
             .contains(s::Permissions::VIEW_CHANNEL | s::Permissions::CONNECT)
         {
-            return Err("You must be able to view and connect to the destination".into());
+            return Err(crate::errors::user(
+                "You must be able to view and connect to the destination",
+            ));
         }
         if !partial.user_permissions_in(&dest, &bot).contains(
             s::Permissions::VIEW_CHANNEL | s::Permissions::CONNECT | s::Permissions::MOVE_MEMBERS,
         ) {
-            return Err(
-                "Grant the bot View Channel, Connect, and Move Members in the DND channel".into(),
-            );
+            return Err(crate::errors::user(
+                "Grant the bot View Channel, Connect, and Move Members in the DND channel",
+            ));
         }
         Some(dest.id.get())
     } else {

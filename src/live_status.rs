@@ -91,11 +91,13 @@ impl Service {
         };
         match s::ChannelId::new(id).to_channel(&self.ctx.http).await {
             Ok(channel) => {
-                let channel = channel
-                    .guild()
-                    .ok_or("Stored status channel is not a guild channel")?;
+                let channel = channel.guild().ok_or_else(|| {
+                    crate::errors::user("Stored status channel is not a guild channel")
+                })?;
                 if channel.guild_id != self.guild || channel.kind != kind {
-                    return Err("Stored status channel has the wrong server/type".into());
+                    return Err(crate::errors::user(
+                        "Stored status channel has the wrong server/type",
+                    ));
                 }
                 Ok(Some(channel))
             }
@@ -216,7 +218,7 @@ impl Service {
             .is_ok();
         let db_ms = started.elapsed().as_millis();
         let seconds = self.started.elapsed().as_secs();
-        let mut embed = s::CreateEmbed::new()
+        let mut embed = crate::emoji::embed()
             .title("ELVNX / BOT STATUS")
             .color(if connected && db_ok {
                 0x111111
@@ -224,9 +226,15 @@ impl Service {
                 0xbb3333
             })
             .description(if connected && db_ok {
-                "🟢 Online · gateway and database responding"
+                format!(
+                    "{} Online · gateway and database responding",
+                    crate::emoji::text("online")
+                )
             } else {
-                "🟡 Degraded · check gateway/database health"
+                format!(
+                    "{} Degraded · check gateway/database health",
+                    crate::emoji::text("warning")
+                )
             })
             .field("Bot", format!("{} · `{}`", bot.name, bot.id), false)
             .field(
@@ -332,7 +340,9 @@ impl Service {
         let channel = self
             .channel(Some(channel), s::ChannelType::Text)
             .await?
-            .ok_or("Status channel deleted; rerun /bot-status-live to repair it")?;
+            .ok_or_else(|| {
+                crate::errors::user("Status channel deleted; rerun /bot-status-live to repair it")
+            })?;
         if let Some(id) = old
             && self.edit_board(channel.id, id, &embed).await?
         {
@@ -389,12 +399,12 @@ impl Service {
                 cfg.bot_message
             };
             let embed = if !cfg.enabled {
-                s::CreateEmbed::new().title(if music { "ELVNX / LAVALINK STATUS" } else { "ELVNX / BOT STATUS" }).description("Live updates paused. An administrator can enable /bot-status-live to resume.").color(0x111111).timestamp(s::Timestamp::now())
+                crate::emoji::embed().title(if music { "ELVNX / LAVALINK STATUS" } else { "ELVNX / BOT STATUS" }).description("Live updates paused. An administrator can enable /bot-status-live to resume.").color(0x111111).timestamp(s::Timestamp::now())
             } else if music {
                 if let Some(node) = &self.music {
                     node.live_embed().await
                 } else {
-                    s::CreateEmbed::new()
+                    crate::emoji::embed()
                         .title("ELVNX / LAVALINK STATUS")
                         .description("Music node is not configured.")
                         .color(0x111111)
@@ -457,5 +467,5 @@ pub async fn bot_status_live(
 ) -> Result<(), Error> {
     let enabled = enabled.unwrap_or(true);
     let cfg = ctx.data().live_status.setup(enabled).await?;
-    reply(ctx, if enabled { format!("Live status enabled.\nBot: <#{}>\nLavalink: <#{}>\nUpdates every 30 seconds. A stale timestamp can indicate an offline bot/updater. Reusing this command preserves the tracked channels and messages.", cfg.bot_channel.ok_or("Bot status channel missing")?, cfg.music_channel.ok_or("Music status channel missing")?) } else { "Live status updates paused. Channels and messages are preserved.".into() }).await
+    reply(ctx, if enabled { format!("Live status enabled.\nBot: <#{}>\nLavalink: <#{}>\nUpdates every 30 seconds. A stale timestamp can indicate an offline bot/updater. Reusing this command preserves the tracked channels and messages.", cfg.bot_channel.ok_or_else(|| crate::errors::user("Bot status channel missing"))?, cfg.music_channel.ok_or_else(|| crate::errors::user("Music status channel missing"))?) } else { "Live status updates paused. Channels and messages are preserved.".into() }).await
 }

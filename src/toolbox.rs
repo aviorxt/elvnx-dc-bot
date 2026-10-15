@@ -18,12 +18,12 @@ fn now() -> i64 {
 fn text(value: &str, max: usize) -> Result<&str, Error> {
     let value = value.trim();
     if value.is_empty() || value.encode_utf16().count() > max {
-        return Err(format!("Enter 1–{max} characters.").into());
+        return Err(crate::errors::user(format!("Enter 1–{max} characters.")));
     }
     Ok(value)
 }
 fn embed(title: &str, body: impl Into<String>) -> s::CreateEmbed {
-    s::CreateEmbed::new()
+    crate::emoji::named(title)
         .title(format!("ELVNX / {title}"))
         .description(body)
         .color(0x111111)
@@ -40,9 +40,9 @@ async fn destination(
         .to_channel(&ctx.http)
         .await?
         .guild()
-        .ok_or("Server text channel required")?;
+        .ok_or_else(|| crate::errors::user("Server text channel required"))?;
     if channel.guild_id != guild || channel.kind != s::ChannelType::Text {
-        return Err("Select a text channel in this server.".into());
+        return Err(crate::errors::user("Select a text channel in this server."));
     }
     let partial = guild.to_partial_guild(&ctx.http).await?;
     let member = guild.member(&ctx.http, actor).await?;
@@ -50,7 +50,9 @@ async fn destination(
         .member_permissions(&member)
         .contains(s::Permissions::MANAGE_GUILD)
     {
-        return Err("The creator no longer has Manage Server.".into());
+        return Err(crate::errors::user(
+            "The creator no longer has Manage Server.",
+        ));
     }
     let bot_id = ctx.cache.current_user().id;
     for user in [actor, bot_id] {
@@ -66,10 +68,9 @@ async fn destination(
             .user_permissions_in(&channel, &member)
             .contains(required)
         {
-            return Err(
-                "Creator/bot destination access or Embed Links/Attach Files permission is missing."
-                    .into(),
-            );
+            return Err(crate::errors::user(
+                "Creator/bot destination access or Embed Links/Attach Files permission is missing.",
+            ));
         }
     }
     Ok(channel)
@@ -132,10 +133,10 @@ async fn media_panel(
             ),
         ))
         .components(vec![s::CreateActionRow::Buttons(vec![
-            s::CreateButton::new(&nonce)
+            crate::emoji::button(&nonce)
                 .label("Post media")
                 .style(s::ButtonStyle::Primary),
-            s::CreateButton::new(&cancel)
+            crate::emoji::button(&cancel)
                 .label("Cancel")
                 .style(s::ButtonStyle::Secondary),
         ])])
@@ -204,8 +205,8 @@ async fn media_panel(
             poise::CreateReply::default()
                 .embed(embed(
                     "MEDIA PANEL",
-                    outcome.unwrap_or_else(|_| {
-                        "Could not complete posting. Check the destination before retrying.".into()
+                    outcome.unwrap_or_else(|error| {
+                        crate::errors::with_reference(error.as_ref(), "media-panel", ctx.id())
                     }),
                 ))
                 .components(vec![]),
@@ -243,8 +244,12 @@ async fn schedule_post(
     let guild = ctx.data().guild.to_string();
     match action {
         PostAction::Create => {
-            let channel = channel.ok_or("Select a destination")?;
-            let due = crate::features::due(when.as_deref().ok_or("Choose a time")?, now())?;
+            let channel = channel.ok_or_else(|| crate::errors::user("Select a destination"))?;
+            let due = crate::features::due(
+                when.as_deref()
+                    .ok_or_else(|| crate::errors::user("Choose a time"))?,
+                now(),
+            )?;
             let body = message.unwrap_or_default();
             if body.encode_utf16().count() > 2000 || (body.trim().is_empty() && file.is_none()) {
                 return reply(
@@ -300,7 +305,7 @@ async fn schedule_post(
             .await
         }
         PostAction::Cancel => {
-            let result=sqlx::query("UPDATE scheduled_posts SET state='canceled',media=NULL,filename=NULL,text='' WHERE guild=? AND id=? AND state='pending'").bind(&guild).bind(id.ok_or("Choose a post ID")?).execute(&ctx.data().db).await?;
+            let result=sqlx::query("UPDATE scheduled_posts SET state='canceled',media=NULL,filename=NULL,text='' WHERE guild=? AND id=? AND state='pending'").bind(&guild).bind(id.ok_or_else(|| crate::errors::user("Choose a post ID"))?).execute(&ctx.data().db).await?;
             reply(
                 ctx,
                 if result.rows_affected() == 1 {
@@ -325,7 +330,7 @@ async fn schedule_post(
             if due.is_none() && message.is_none() {
                 return reply(ctx, "Provide a new time or text.").await;
             }
-            let result=sqlx::query("UPDATE scheduled_posts SET due=COALESCE(?,due),text=COALESCE(?,text) WHERE guild=? AND id=? AND state='pending'").bind(due).bind(message).bind(&guild).bind(id.ok_or("Choose a post ID")?).execute(&ctx.data().db).await?;
+            let result=sqlx::query("UPDATE scheduled_posts SET due=COALESCE(?,due),text=COALESCE(?,text) WHERE guild=? AND id=? AND state='pending'").bind(due).bind(message).bind(&guild).bind(id.ok_or_else(|| crate::errors::user("Choose a post ID"))?).execute(&ctx.data().db).await?;
             reply(
                 ctx,
                 if result.rows_affected() == 1 {
@@ -397,7 +402,7 @@ async fn event(
             .await
         }
         EventAction::Cancel => {
-            let raw = id.ok_or("Choose an event ID")?;
+            let raw = id.ok_or_else(|| crate::errors::user("Choose an event ID"))?;
             let exists: i64 = sqlx::query_scalar(
                 "SELECT COUNT(*) FROM community_events WHERE guild=? AND id=? AND state='open'",
             )
@@ -434,11 +439,15 @@ async fn event(
         }
         EventAction::Create => {
             let _guard = ctx.data().configuration_lock.lock().await;
-            let name = name.ok_or("Choose a name")?;
+            let name = name.ok_or_else(|| crate::errors::user("Choose a name"))?;
             text(&name, 80)?;
             let description = description.unwrap_or_else(|| "ELVNX community event".into());
             text(&description, 1000)?;
-            let due = crate::features::due(when.as_deref().ok_or("Choose a start time")?, now())?;
+            let due = crate::features::due(
+                when.as_deref()
+                    .ok_or_else(|| crate::errors::user("Choose a start time"))?,
+                now(),
+            )?;
             let minutes = minutes.unwrap_or(120);
             if due < now() + 1200 || !(15..=720).contains(&minutes) {
                 return reply(
@@ -448,7 +457,8 @@ async fn event(
                 .await;
             }
             let ends = due + i64::from(minutes) * 60;
-            let channel = channel.ok_or("Choose an announcement channel")?;
+            let channel =
+                channel.ok_or_else(|| crate::errors::user("Choose an announcement channel"))?;
             destination(
                 ctx.serenity_context(),
                 guild,
@@ -457,7 +467,7 @@ async fn event(
                 true,
             )
             .await?;
-            let template = voice.ok_or("Choose a voice room")?;
+            let template = voice.ok_or_else(|| crate::errors::user("Choose a voice room"))?;
             if template.guild_id != guild || template.kind != s::ChannelType::Voice {
                 return reply(ctx, "Choose a voice room in this server.").await;
             }
@@ -551,7 +561,7 @@ async fn event(
             }
             let url = format!("https://discord.com/events/{guild}/{}", event.id);
             let sent=channel.id.send_message(ctx.http(),s::CreateMessage::new().embed(embed("COMMUNITY EVENT",format!("**{name}**\n{description}\n\n<t:{due}:F> · <t:{due}:R>\nVoice room <#{}>\nUse **Interested / RSVP** on the Discord event. Reminder posts here 15 minutes before start.",room.id)).image("attachment://event-cover.png"))
-                .add_file(s::CreateAttachment::bytes(png,"event-cover.png")).components(vec![s::CreateActionRow::Buttons(vec![s::CreateButton::new_link(&url).label("Interested / RSVP")])]).allowed_mentions(s::CreateAllowedMentions::new())).await;
+                .add_file(s::CreateAttachment::bytes(png,"event-cover.png")).components(vec![s::CreateActionRow::Buttons(vec![crate::emoji::link(&url).label("Interested / RSVP")])]).allowed_mentions(s::CreateAllowedMentions::new())).await;
             reply(ctx,format!("Event created: {url}\nAnnouncement: {}. Native Discord RSVP notifications are managed by Discord. Temporary rooms are removed after the event ends and everyone leaves.",if sent.is_ok(){"posted"}else{"failed; event remains created—do not recreate it"})).await
         }
     }
@@ -574,13 +584,13 @@ enum ReviewAction {
 }
 pub(crate) fn review_buttons(id: i64) -> Vec<s::CreateActionRow> {
     vec![s::CreateActionRow::Buttons(vec![
-        s::CreateButton::new(format!("review-claim-{id}"))
+        crate::emoji::button(format!("review-claim-{id}"))
             .label("Claim")
             .style(s::ButtonStyle::Primary),
-        s::CreateButton::new(format!("review-resolve-{id}"))
+        crate::emoji::button(format!("review-resolve-{id}"))
             .label("Resolve")
             .style(s::ButtonStyle::Success),
-        s::CreateButton::new(format!("review-reopen-{id}"))
+        crate::emoji::button(format!("review-reopen-{id}"))
             .label("Reopen")
             .style(s::ButtonStyle::Secondary),
     ])]
@@ -598,7 +608,7 @@ async fn review_change(
     let channel = channel.to_string();
     let changed=match action{
         ReviewAction::Claim=>sqlx::query("UPDATE review_queue SET assignee=?,state='claimed' WHERE guild=? AND channel=? AND report=? AND state='open' AND assignee IS NULL").bind(actor.to_string()).bind(&guild).bind(&channel).bind(id).execute(db).await?,
-        ReviewAction::Resolve=>{let note=text(note.ok_or("Provide a resolution note")?,500)?;sqlx::query("UPDATE review_queue SET state='resolved',note=? WHERE guild=? AND channel=? AND report=? AND state='claimed' AND assignee=?").bind(note).bind(&guild).bind(&channel).bind(id).bind(actor.to_string()).execute(db).await?},
+        ReviewAction::Resolve=>{let note=text(note.ok_or_else(|| crate::errors::user("Provide a resolution note"))?,500)?;sqlx::query("UPDATE review_queue SET state='resolved',note=? WHERE guild=? AND channel=? AND report=? AND state='claimed' AND assignee=?").bind(note).bind(&guild).bind(&channel).bind(id).bind(actor.to_string()).execute(db).await?},
         ReviewAction::Reopen=>sqlx::query("UPDATE review_queue SET state='open',assignee=NULL,note='' WHERE guild=? AND channel=? AND report=? AND state='resolved'").bind(&guild).bind(&channel).bind(id).execute(db).await?,
         ReviewAction::List=>return Ok(false),
     };
@@ -611,13 +621,15 @@ async fn review_access(
     channel: s::ChannelId,
 ) -> Result<(), Error> {
     if data.settings.read().await.report_channel != Some(channel.get()) {
-        return Err("This is not the current report destination.".into());
+        return Err(crate::errors::user(
+            "This is not the current report destination.",
+        ));
     }
     let channel = channel
         .to_channel(&ctx.http)
         .await?
         .guild()
-        .ok_or("Staff channel unavailable")?;
+        .ok_or_else(|| crate::errors::user("Staff channel unavailable"))?;
     crate::features::private_reports(ctx, data.guild, &channel).await?;
     let guild = data.guild.to_partial_guild(&ctx.http).await?;
     let member = data.guild.member(&ctx.http, user).await?;
@@ -629,7 +641,9 @@ async fn review_access(
             .user_permissions_in(&channel, &member)
             .contains(s::Permissions::VIEW_CHANNEL)
     {
-        return Err("You need Moderate Members and access to the private staff channel.".into());
+        return Err(crate::errors::user(
+            "You need Moderate Members and access to the private staff channel.",
+        ));
     }
     Ok(())
 }
@@ -645,7 +659,7 @@ async fn refresh_review(ctx: &s::Context, data: &Data, id: i64) -> Result<(), Er
     let message = s::MessageId::new(row.get::<String, _>("message").parse()?);
     let original = channel.message(&ctx.http, message).await?;
     if original.author.id != ctx.cache.current_user().id {
-        return Err("Report message ownership changed".into());
+        return Err(crate::errors::user("Report message ownership changed"));
     }
     let Some(mut original_embed) = original.embeds.into_iter().next() else {
         return Ok(());
@@ -707,11 +721,11 @@ pub async fn gateway(ctx: &s::Context, event: &s::FullEvent, data: &Data) -> Res
             ))
         });
     let access:Result<(ReviewAction,i64),Error>=async{
-        if button.guild_id!=Some(data.guild)||button.message.author.id!=ctx.cache.current_user().id{return Err("Invalid staff panel".into());}
+        if button.guild_id!=Some(data.guild)||button.message.author.id!=ctx.cache.current_user().id{return Err(crate::errors::user("Invalid staff panel"));}
         review_access(ctx,data,button.user.id,button.channel_id).await?;
-        let (action,id)=parsed.ok_or("Invalid report action")?;
+        let (action,id)=parsed.ok_or_else(|| crate::errors::user("Invalid report action"))?;
         let matched:i64=sqlx::query_scalar("SELECT COUNT(*) FROM review_queue WHERE guild=? AND channel=? AND message=? AND report=?").bind(data.guild.to_string()).bind(button.channel_id.to_string()).bind(button.message.id.to_string()).bind(id).fetch_one(&data.db).await?;
-        if matched!=1{return Err("Report tracking is unavailable or expired. Use the staff channel.".into());}Ok((action,id))
+        if matched!=1{return Err(crate::errors::user("Report tracking is unavailable or expired. Use the staff channel."));}Ok((action,id))
     }.await;
     let (action, id) = match access {
         Ok(v) => v,
@@ -722,7 +736,14 @@ pub async fn gateway(ctx: &s::Context, event: &s::FullEvent, data: &Data) -> Res
                     s::CreateInteractionResponse::Message(
                         s::CreateInteractionResponseMessage::new()
                             .ephemeral(true)
-                            .embed(embed("REVIEW UNAVAILABLE", error.to_string()))
+                            .embed(embed(
+                                "REVIEW UNAVAILABLE",
+                                crate::errors::with_reference(
+                                    error.as_ref(),
+                                    "mod-review",
+                                    button.id.get(),
+                                ),
+                            ))
                             .allowed_mentions(s::CreateAllowedMentions::new()),
                     ),
                 )
@@ -769,7 +790,7 @@ pub async fn gateway(ctx: &s::Context, event: &s::FullEvent, data: &Data) -> Res
                 .await
             }
             .await;
-            let body = review_outcome(&result);
+            let body = review_outcome(&result, button.id.get());
             if matches!(result, Ok(true)) {
                 let _ = refresh_review(ctx, data, id).await;
                 let _ = crate::store::case(
@@ -810,7 +831,7 @@ pub async fn gateway(ctx: &s::Context, event: &s::FullEvent, data: &Data) -> Res
             None,
         )
         .await;
-        let body = review_outcome(&result);
+        let body = review_outcome(&result, button.id.get());
         if matches!(result, Ok(true)) {
             let _ = refresh_review(ctx, data, id).await;
             let _ = crate::store::case(
@@ -834,8 +855,8 @@ pub async fn gateway(ctx: &s::Context, event: &s::FullEvent, data: &Data) -> Res
     }
     Ok(true)
 }
-fn review_outcome(result: &Result<bool, Error>) -> String {
-    match result{Ok(true)=>"Report updated. This does not automatically punish or notify the reporter.".into(),Ok(false)=>"No eligible report found. Claim an open report first; only its assignee can resolve it.".into(),Err(e)=>e.to_string()}
+fn review_outcome(result: &Result<bool, Error>, reference: u64) -> String {
+    match result{Ok(true)=>"Report updated. This does not automatically punish or notify the reporter.".into(),Ok(false)=>"No eligible report found. Claim an open report first; only its assignee can resolve it.".into(),Err(e)=>crate::errors::with_reference(e.as_ref(),"mod-review",reference)}
 }
 /// Review the confidential report queue; claim, resolve, or reopen a receipt.
 #[poise::command(
@@ -858,12 +879,12 @@ async fn mod_review(
         .read()
         .await
         .report_channel
-        .ok_or("Configure /setup-report first")?;
+        .ok_or_else(|| crate::errors::user("Configure /setup-report first"))?;
     let channel = s::ChannelId::new(channel)
         .to_channel(ctx.http())
         .await?
         .guild()
-        .ok_or("Report channel unavailable")?;
+        .ok_or_else(|| crate::errors::user("Report channel unavailable"))?;
     crate::features::private_reports(ctx.serenity_context(), ctx.data().guild, &channel).await?;
     let partial = ctx.data().guild.to_partial_guild(ctx.http()).await?;
     let member = ctx.data().guild.member(ctx.http(), ctx.author().id).await?;
@@ -897,7 +918,7 @@ async fn mod_review(
             reply(ctx,if list.is_empty(){"No queued reports. New submissions appear here; older reports remain in the staff channel. Moderation case history is available via /case and /warnings.".into()}else{list}).await
         }
         _ => {
-            let id = id.ok_or("Choose a report receipt")?;
+            let id = id.ok_or_else(|| crate::errors::user("Choose a report receipt"))?;
             let changed = review_change(
                 &ctx.data().db,
                 ctx.data().guild,
@@ -941,7 +962,7 @@ async fn privacy(
                     .bind(&user)
                     .fetch_one(&ctx.data().db)
                     .await?;
-            reply(ctx,format!("**Activity tracking:** {}\nWhen enabled server-wide, we save message counts and voice duration, not message contents in the activity database. Daily counters are retained for 30 days; cumulative counters remain until erased. Presence is kept in memory.\n\nUse **EraseAndStop confirm:true** to erase your activity counters and stop future counting. **Resume** permits future counting. Birthday opt-in uses /birthday-remove. Playlists use /playlist delete.\n\nModeration cases, reports, Discord log messages and already-posted report images are separate staff records; this command does not delete them. Contact staff for other deletion requests. Scheduled-post uploads are stored privately until delivery/cancellation; cancel them with /schedule-post.",if opted>0{"you opted out"}else{"subject to server settings"})).await
+            reply(ctx,format!("**Activity tracking:** {}\nWhen enabled server-wide, we save message counts and voice duration, not message contents in the activity database. Daily counters are retained for 30 days; cumulative counters remain until erased. Presence is kept in memory.\n\nUse **EraseAndStop confirm:true** to erase your activity counters and stop future counting. **Resume** permits future counting. Birthday opt-in uses /birthday-remove. Playlists use /playlist delete. Shared music links remain in the favorites collection until removed with /playlist favorites Remove (your links or staff). Music session totals are held in memory until recap delivery; opting out hides your requester identity from future recaps. Posted recaps remain in Discord until deleted.\n\nModeration cases, reports, Discord log messages and already-posted report images are separate staff records; this command does not delete them. Contact staff for other deletion requests. Scheduled-post uploads are stored privately until delivery/cancellation; cancel them with /schedule-post.",if opted>0{"you opted out"}else{"subject to server settings"})).await
         }
         PrivacyAction::EraseAndStop => {
             if confirm != Some(true) {
@@ -1011,7 +1032,7 @@ pub(crate) async fn permission_check(
             .to_channel(ctx.http())
             .await?
             .guild()
-            .ok_or("Server channel required")?,
+            .ok_or_else(|| crate::errors::user("Server channel required"))?,
     };
     if channel.guild_id != ctx.data().guild {
         return reply(ctx, "Choose a channel in this server.").await;
@@ -1137,7 +1158,8 @@ async fn server_health(
     ctx.defer_ephemeral().await?;
     if let Some(enabled) = alerts {
         if enabled {
-            let channel = channel.ok_or("Choose a private staff channel")?;
+            let channel =
+                channel.ok_or_else(|| crate::errors::user("Choose a private staff channel"))?;
             destination(
                 ctx.serenity_context(),
                 ctx.data().guild,
@@ -1218,6 +1240,9 @@ pub fn start(
         let mut alert_destination = None;
         loop {
             interval.tick().await;
+            if let Err(error) = crate::verification::cleanup(&db).await {
+                tracing::warn!(%error,"Verification retention cleanup failed");
+            }
             let connected = manager
                 .runners
                 .lock()
@@ -1226,6 +1251,9 @@ pub fn start(
                 .is_some_and(|runner| runner.stage == s::ConnectionStage::Connected);
             if !connected {
                 continue;
+            }
+            if let Err(error) = crate::honeypot::tick(&ctx, &db, guild).await {
+                tracing::warn!(%error,"Honeypot recovery check failed");
             }
             if let Err(error) = posts_tick(&ctx, &db, guild).await {
                 tracing::warn!(%error,"Post scheduler failed");
@@ -1280,7 +1308,9 @@ async fn posts_tick(ctx: &s::Context, db: &SqlitePool, guild: s::GuildId) -> Res
         };
         let result: Result<(), Error> = async {
             if row.get::<i64, _>("due") < now() - 86400 {
-                return Err("Scheduled post expired during extended downtime".into());
+                return Err(crate::errors::user(
+                    "Scheduled post expired during extended downtime",
+                ));
             }
             let bytes = row.get::<Option<Vec<u8>>, _>("media");
             let channel = destination(

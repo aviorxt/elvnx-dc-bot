@@ -41,6 +41,7 @@ pub async fn handle(
 ) -> Result<(), Error> {
     let bot_id = ctx.cache.current_user().id;
     data.availability.observe(event).await;
+    data.presence.observe(event).await;
     if let s::FullEvent::ShardStageUpdate { event } = event {
         data.afk
             .connection(event.new == s::ConnectionStage::Connected)
@@ -54,8 +55,39 @@ pub async fn handle(
             tracing::warn!(%error, "Appukuttan join announcement failed; check destination permissions");
         }
     }
+    if matches!(event,s::FullEvent::GuildCreate {guild,..} if guild.id==data.guild)
+        && let Err(error) = crate::eventlog::refresh(ctx, data).await
+    {
+        tracing::warn!(%error,"Activity desk header refresh failed");
+    }
     crate::music::gateway(ctx, event, data).await;
     crate::eventlog::handle(ctx, event, data).await;
+    if crate::voice_rooms::gateway(ctx, event, data).await? {
+        return Ok(());
+    }
+
+    if matches!(event, s::FullEvent::Ready { .. }) {
+        if let Err(error) = crate::verification::refresh_panel(ctx, data).await {
+            tracing::warn!(%error,"Verification panel styling refresh failed");
+        }
+        let channel = data.settings.read().await.honeypot_channel;
+        if let Some(channel) = channel
+            && let Err(error) =
+                crate::honeypot::refresh(ctx, &data.db, data.guild, s::ChannelId::new(channel))
+                    .await
+        {
+            tracing::warn!(%error,"Honeypot warning refresh failed; unmarked trap triggers will be blocked");
+        }
+    }
+    if let s::FullEvent::Message { new_message } = event
+        && crate::honeypot::message(ctx, data, new_message).await?
+    {
+        return Ok(());
+    }
+
+    if crate::verification::gateway(ctx, event, data).await? {
+        return Ok(());
+    }
     if crate::toolbox::gateway(ctx, event, data).await? {
         return Ok(());
     }
@@ -155,7 +187,9 @@ pub async fn handle(
         {
             let cfg = data.settings.read().await.clone();
             if !member.user.bot {
-                if let Some(role) = cfg.autorole {
+                if let Some(role) = cfg.autorole
+                    && !crate::verification::reserved(data, role).await?
+                {
                     let guild = data.guild.to_partial_guild(&ctx.http).await?;
                     let bot = data.guild.member(&ctx.http, bot_id).await?;
                     if let Some(role) = guild.roles.get(&s::RoleId::new(role))
@@ -179,7 +213,7 @@ pub async fn handle(
                     };
                     let mut welcome = s::CreateMessage::new()
                         .embed(
-                            s::CreateEmbed::new()
+                            crate::emoji::embed()
                                 .title("ELVNX / WELCOME")
                                 .description(text)
                                 .color(0x111111),
@@ -201,89 +235,6 @@ pub async fn handle(
                         .await?;
                 }
             }
-            log(
-                &ctx.http,
-                data,
-                format!("Member joined: {} ({})", member.user.name, member.user.id),
-            )
-            .await;
-        }
-        s::FullEvent::GuildMemberRemoval { guild_id, user, .. } if *guild_id == data.guild => {
-            log(
-                &ctx.http,
-                data,
-                format!("Member left: {} ({})", user.name, user.id),
-            )
-            .await
-        }
-        s::FullEvent::GuildBanAddition {
-            guild_id,
-            banned_user,
-        } if *guild_id == data.guild => {
-            log(
-                &ctx.http,
-                data,
-                format!("Member banned: {}", banned_user.id),
-            )
-            .await
-        }
-        s::FullEvent::GuildBanRemoval {
-            guild_id,
-            unbanned_user,
-        } if *guild_id == data.guild => {
-            log(
-                &ctx.http,
-                data,
-                format!("Member unbanned: {}", unbanned_user.id),
-            )
-            .await
-        }
-        s::FullEvent::ChannelCreate { channel } if channel.guild_id == data.guild => {
-            log(
-                &ctx.http,
-                data,
-                format!("Channel created: {} ({})", channel.name, channel.id),
-            )
-            .await
-        }
-        s::FullEvent::ChannelDelete { channel, .. } if channel.guild_id == data.guild => {
-            log(
-                &ctx.http,
-                data,
-                format!("Channel deleted: {} ({})", channel.name, channel.id),
-            )
-            .await
-        }
-        s::FullEvent::ChannelUpdate { new, .. } if new.guild_id == data.guild => {
-            log(
-                &ctx.http,
-                data,
-                format!("Channel updated: {} ({})", new.name, new.id),
-            )
-            .await
-        }
-        s::FullEvent::GuildRoleCreate { new } if new.guild_id == data.guild => {
-            log(
-                &ctx.http,
-                data,
-                format!("Role created: {} ({})", new.name, new.id),
-            )
-            .await
-        }
-        s::FullEvent::GuildRoleUpdate { new, .. } if new.guild_id == data.guild => {
-            log(
-                &ctx.http,
-                data,
-                format!("Role updated: {} ({})", new.name, new.id),
-            )
-            .await
-        }
-        s::FullEvent::GuildRoleDelete {
-            guild_id,
-            removed_role_id,
-            ..
-        } if *guild_id == data.guild => {
-            log(&ctx.http, data, format!("Role deleted: {removed_role_id}")).await
         }
         _ => {}
     }

@@ -3,7 +3,7 @@ use crate::{Context, Error, serenity as s};
 pub fn reason(value: &str) -> Result<&str, Error> {
     let text = value.trim();
     if text.is_empty() || text.chars().count() > 400 {
-        return Err("Reason must contain 1–400 characters.".into());
+        return Err(crate::errors::user("Reason must contain 1–400 characters."));
     }
     Ok(text)
 }
@@ -26,7 +26,9 @@ pub async fn target(
     member: &s::Member,
     permission: s::Permissions,
 ) -> Result<(), Error> {
-    let guild_id = ctx.guild_id().ok_or("Guild required.")?;
+    let guild_id = ctx
+        .guild_id()
+        .ok_or_else(|| crate::errors::user("Guild required."))?;
     let guild = guild_id.to_partial_guild(ctx.http()).await?;
     let actor = guild_id.member(ctx.http(), ctx.author().id).await?;
     let bot_id = ctx.serenity_context().cache.current_user().id;
@@ -35,32 +37,38 @@ pub async fn target(
     if !guild.member_permissions(&actor).contains(permission)
         || !guild.member_permissions(&bot).contains(permission)
     {
-        return Err("You and the bot must both have the required permission.".into());
+        return Err(crate::errors::user(
+            "You and the bot must both have the required permission.",
+        ));
     }
     if target.user.id == guild.owner_id
         || target.user.id == actor.user.id
         || target.user.id == bot_id
     {
-        return Err("Cannot target the owner, yourself, or this bot.".into());
+        return Err(crate::errors::user(
+            "Cannot target the owner, yourself, or this bot.",
+        ));
     }
     if (actor.user.id != guild.owner_id
         && !higher(highest(&guild, &actor), highest(&guild, &target)))
         || !higher(highest(&guild, &bot), highest(&guild, &target))
     {
-        return Err(
-            "The target must be below both your highest role and the bot's highest role.".into(),
-        );
+        return Err(crate::errors::user(
+            "The target must be below both your highest role and the bot's highest role.",
+        ));
     }
     Ok(())
 }
 
 pub async fn safe_role(ctx: Context<'_>, role: &s::Role) -> Result<(), Error> {
-    let guild_id = ctx.guild_id().ok_or("Guild required.")?;
+    let guild_id = ctx
+        .guild_id()
+        .ok_or_else(|| crate::errors::user("Guild required."))?;
     let guild = guild_id.to_partial_guild(ctx.http()).await?;
     let current = guild
         .roles
         .get(&role.id)
-        .ok_or("Role is not in this guild.")?;
+        .ok_or_else(|| crate::errors::user("Role is not in this guild."))?;
     let bot = guild_id.member(ctx.http(), crate::bot_id(ctx)).await?;
     let actor = guild_id.member(ctx.http(), ctx.author().id).await?;
     let dangerous = s::Permissions::ADMINISTRATOR
@@ -77,15 +85,17 @@ pub async fn safe_role(ctx: Context<'_>, role: &s::Role) -> Result<(), Error> {
         || current.managed
         || current.permissions.intersects(dangerous)
     {
-        return Err(
-            "Managed, everyone, and privileged roles cannot be distributed by this bot.".into(),
-        );
+        return Err(crate::errors::user(
+            "Managed, everyone, and privileged roles cannot be distributed by this bot.",
+        ));
     }
     let rank = (i64::from(current.position), current.id.get());
     if !higher(highest(&guild, &bot), rank)
         || (actor.user.id != guild.owner_id && !higher(highest(&guild, &actor), rank))
     {
-        return Err("Role must be below the bot and the configuring member.".into());
+        return Err(crate::errors::user(
+            "Role must be below the bot and the configuring member.",
+        ));
     }
     Ok(())
 }

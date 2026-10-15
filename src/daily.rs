@@ -98,7 +98,7 @@ pub async fn daily_insight(
             )
             .await;
         }
-        let ch = channel.ok_or("Choose a report channel")?;
+        let ch = channel.ok_or_else(|| crate::errors::user("Choose a report channel"))?;
         crate::commands::posting_channel(ctx, &ch).await?;
         let bot_id = ctx.serenity_context().cache.current_user().id;
         let bot = ctx.data().guild.member(ctx.http(), bot_id).await?;
@@ -107,7 +107,9 @@ pub async fn daily_insight(
             .user_permissions_in(&ch, &bot)
             .contains(s::Permissions::EMBED_LINKS | s::Permissions::ATTACH_FILES)
         {
-            return Err("Grant Embed Links and Attach Files in the report channel".into());
+            return Err(crate::errors::user(
+                "Grant Embed Links and Attach Files in the report channel",
+            ));
         }
         Some(ch.id.get())
     } else {
@@ -192,7 +194,7 @@ pub async fn tick(
     if claim.rows_affected() == 0 {
         return Ok(());
     }
-    let message = s::CreateMessage::new().embed(s::CreateEmbed::new().title(format!("ELVNX / DAILY INSIGHT · {date}")).description(if leaders.is_empty() { "No tracked activity today.".into() } else { leaders.join("\n") }).image("attachment://daily-insight.png").footer(s::CreateEmbedFooter::new("Ranked by messages, then voice time • online tracked periods only • voice connection is not speech")).color(0x111111))
+    let message = s::CreateMessage::new().embed(crate::emoji::embed_for("trophy").title(format!("ELVNX / DAILY INSIGHT · {date}")).description(if leaders.is_empty() { "No tracked activity today.".into() } else { leaders.join("\n") }).image("attachment://daily-insight.png").footer(s::CreateEmbedFooter::new("Ranked by messages, then voice time • online tracked periods only • voice connection is not speech")).color(0x111111))
         .add_file(s::CreateAttachment::bytes(png, "daily-insight.png")).allowed_mentions(s::CreateAllowedMentions::new());
     let result = s::ChannelId::new(channel).send_message(http, message).await;
     sqlx::query("UPDATE scheduled_insights SET state=? WHERE guild=? AND day=?")

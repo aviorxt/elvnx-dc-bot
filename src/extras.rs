@@ -103,7 +103,7 @@ async fn status(
     #[description = "Text, max 100 characters; off clears"] text: String,
 ) -> Result<(), Error> {
     if text.chars().count() > 100 {
-        return Err("Status too long".into());
+        return Err(crate::errors::user("Status too long"));
     }
     let kind = match kind {
         PresenceKind::Playing => "playing",
@@ -162,7 +162,7 @@ async fn quote_daily(
     #[description = "Destination when enabling"] channel: Option<s::GuildChannel>,
 ) -> Result<(), Error> {
     let id = if enabled {
-        let ch = channel.ok_or("Choose a destination channel")?;
+        let ch = channel.ok_or_else(|| crate::errors::user("Choose a destination channel"))?;
         crate::commands::posting_channel(ctx, &ch).await?;
         Some(ch.id.get())
     } else {
@@ -175,7 +175,8 @@ async fn quote_daily(
     )
     .await
 }
-/// Post a rules acknowledgement panel that grants an explicitly approved whitelist role.
+/// Configure secure access verification, inspect requests, or approve/deny a flagged member.
+#[allow(clippy::too_many_arguments)]
 #[poise::command(
     slash_command,
     guild_only,
@@ -185,22 +186,38 @@ async fn quote_daily(
 )]
 async fn verify(
     ctx: Context<'_>,
-    #[description = "Panel channel"] channel: s::GuildChannel,
-    #[description = "Zero-permission whitelist role"] role: s::Role,
-    #[description = "Confirm every member can obtain this role's channel access"]
-    confirm_access: bool,
+    #[description = "Setup, status, approve, or deny a flagged member"] action: Option<
+        crate::verification::Action,
+    >,
+    #[description = "Panel channel for setup"] channel: Option<s::GuildChannel>,
+    #[description = "Zero-permission whitelist role for setup"] role: Option<s::Role>,
+    #[description = "Confirm eligible members may receive this role's channel access"]
+    confirm_access: Option<bool>,
+    #[description = "Account age in days below which staff review is required, 1–365; default 7"]
+    min_account_days: Option<u16>,
+    #[description = "Wait after joining, 0–1440 minutes; default 10"] join_wait_minutes: Option<
+        u16,
+    >,
+    #[description = "Private staff review channel; defaults to the report destination"]
+    review_channel: Option<s::GuildChannel>,
+    #[description = "Flagged member for Approve/Deny"] member: Option<s::Member>,
+    #[description = "Internal reason for a staff decision, max 400 characters"] reason: Option<
+        String,
+    >,
 ) -> Result<(), Error> {
-    if !confirm_access {
-        return reply(ctx,"Canceled. This panel grants the selected role's channel access to every member who clicks.").await;
-    }
-    crate::commands::posting_channel(ctx, &channel).await?;
-    security::safe_role(ctx, &role).await?;
-    if !role.permissions.is_empty() {
-        return Err("Whitelist role must have no global permissions".into());
-    }
-    update(ctx, |c| c.verification_role = Some(role.id.get())).await?;
-    channel.id.send_message(ctx.http(),s::CreateMessage::new().embed(s::CreateEmbed::new().title("ELVNX / ACCESS CHECK").description("Read the server rules, then press Verify to acknowledge them and receive whitelist access. This button is not identity verification.").color(0x111111)).components(vec![s::CreateActionRow::Buttons(vec![s::CreateButton::new(format!("elvnx:verify:{}",role.id)).label("Verify").style(s::ButtonStyle::Success)])]).allowed_mentions(s::CreateAllowedMentions::new())).await?;
-    reply(ctx, "Verification panel posted.").await
+    crate::verification::command(
+        ctx,
+        action.unwrap_or(crate::verification::Action::Setup),
+        channel,
+        role,
+        confirm_access.unwrap_or(false),
+        min_account_days,
+        join_wait_minutes,
+        review_channel,
+        member,
+        reason,
+    )
+    .await
 }
 /// Check uptime for the current running process.
 #[poise::command(slash_command, guild_only)]
@@ -328,7 +345,7 @@ async fn welcome_setup(
     crate::commands::posting_channel(ctx, &channel).await?;
     let text = text.unwrap_or_else(|| "Welcome, {user}. You are part of ELVNX.".into());
     if text.chars().count() > 1500 {
-        return Err("Welcome text too long".into());
+        return Err(crate::errors::user("Welcome text too long"));
     }
     update(ctx, |c| {
         c.welcome_channel = Some(channel.id.get());
@@ -390,22 +407,7 @@ async fn honeypot(
     #[description = "Trap channel when enabling"] channel: Option<s::GuildChannel>,
     #[description = "Confirm ordinary users posting there will be softbanned"] confirm: bool,
 ) -> Result<(), Error> {
-    if enabled && !confirm {
-        return reply(ctx,"Canceled. Posting in this trap can remove a legitimate member too; confirmation is required.").await;
-    }
-    let id = if enabled {
-        let channel = channel.ok_or("Choose a trap channel")?;
-        crate::commands::posting_channel(ctx, &channel).await?;
-        if ctx.data().settings.read().await.log_channel.is_none() {
-            return Err("Configure a private log channel first".into());
-        }
-        channel.id.send_message(ctx.http(),s::CreateMessage::new().content("⚠️ **HONEYPOT — DO NOT POST**\nThis channel is a spam trap. Posting here triggers removal from the server. Staff and configured trusted integrations are exempt.").allowed_mentions(s::CreateAllowedMentions::new())).await?;
-        Some(channel.id.get())
-    } else {
-        None
-    };
-    update(ctx, |c| c.honeypot_channel = id).await?;
-    reply(ctx, "Honeypot settings saved.").await
+    crate::honeypot::configure(ctx, enabled, channel, confirm).await
 }
 /// List server roles (paginated in groups of 20).
 #[poise::command(
@@ -555,163 +557,6 @@ pub async fn gateway(ctx: &s::Context, event: &s::FullEvent, data: &Data) -> Res
     let bot_id = ctx.cache.current_user().id;
     let cfg = data.settings.read().await.clone();
     match event {
-        s::FullEvent::InteractionCreate {
-            interaction: s::Interaction::Component(button),
-        } if button.guild_id == Some(data.guild)
-            && button.data.custom_id.starts_with("elvnx:verify:") =>
-        {
-            button
-                .create_response(
-                    &ctx.http,
-                    s::CreateInteractionResponse::Defer(
-                        s::CreateInteractionResponseMessage::new().ephemeral(true),
-                    ),
-                )
-                .await?;
-            let result: Result<(), Error> = async {
-                let role: u64 = button
-                    .data
-                    .custom_id
-                    .trim_start_matches("elvnx:verify:")
-                    .parse()?;
-                if cfg.verification_role != Some(role) {
-                    return Err("This panel is no longer active".into());
-                }
-                let guild = data.guild.to_partial_guild(&ctx.http).await?;
-                let role = guild
-                    .roles
-                    .get(&s::RoleId::new(role))
-                    .ok_or("Role removed")?;
-                let bot = data.guild.member(&ctx.http, bot_id).await?;
-                if role.id.get() == data.guild.get()
-                    || role.managed
-                    || !role.permissions.is_empty()
-                    || !security::higher(
-                        security::highest(&guild, &bot),
-                        (i64::from(role.position), role.id.get()),
-                    )
-                {
-                    return Err("Role is no longer safe for verification".into());
-                }
-                let member = data.guild.member(&ctx.http, button.user.id).await?;
-                if member.user.bot {
-                    return Err("Human members only".into());
-                }
-                member.add_role(&ctx.http, role.id).await?;
-                store::case(
-                    &data.db,
-                    data.guild.get(),
-                    member.user.id.get(),
-                    member.user.id.get(),
-                    "verify",
-                    &format!("Role {}", role.id),
-                )
-                .await?;
-                Ok(())
-            }
-            .await;
-            let text = if result.is_ok() {
-                "Verified: whitelist role granted."
-            } else {
-                "Verification failed. Ask a moderator to check the active panel and role permissions."
-            };
-            if let Err(error) = result {
-                tracing::warn!(%error,"Verification failed");
-            }
-            button
-                .edit_response(
-                    &ctx.http,
-                    s::EditInteractionResponse::new()
-                        .embed(
-                            s::CreateEmbed::new()
-                                .title("ELVNX / VERIFICATION")
-                                .description(text)
-                                .color(0x111111),
-                        )
-                        .allowed_mentions(s::CreateAllowedMentions::new()),
-                )
-                .await?;
-        }
-        s::FullEvent::Message { new_message: m }
-            if m.guild_id == Some(data.guild)
-                && m.author.id != bot_id
-                && m.webhook_id.is_none() =>
-        {
-            if cfg.honeypot_channel == Some(m.channel_id.get()) {
-                let rules = data.rules.read().await.clone();
-                let guild = data.guild.to_partial_guild(&ctx.http).await?;
-                let member = data.guild.member(&ctx.http, m.author.id).await?;
-                let bot = data.guild.member(&ctx.http, bot_id).await?;
-                let exempt = member.user.id == guild.owner_id
-                    || rules.trusted_actor_ids.contains(&member.user.id.get())
-                    || guild.member_permissions(&member).intersects(
-                        s::Permissions::ADMINISTRATOR
-                            | s::Permissions::MANAGE_GUILD
-                            | s::Permissions::MODERATE_MEMBERS,
-                    );
-                if !exempt
-                    && security::higher(
-                        security::highest(&guild, &bot),
-                        security::highest(&guild, &member),
-                    )
-                {
-                    let dm=member.user.direct_message(&ctx.http,s::CreateMessage::new().content("You posted in ELVNX's marked honeypot channel. The bot is removing you from the server with a softban (ban followed immediately by unban). Contact the server owner if this was a mistake.").allowed_mentions(s::CreateAllowedMentions::new())).await;
-                    data.guild
-                        .ban_with_reason(
-                            &ctx.http,
-                            member.user.id,
-                            0,
-                            "Configured ELVNX honeypot trigger",
-                        )
-                        .await?;
-                    // Unban immediately. On failure record/alert the remaining ban and make
-                    // one short delayed repair attempt; never silently call it a softban.
-                    let mut unban = data.guild.unban(&ctx.http, member.user.id).await;
-                    if unban.is_err() {
-                        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-                        unban = data.guild.unban(&ctx.http, member.user.id).await;
-                    }
-                    let outcome = if unban.is_ok() {
-                        "softban"
-                    } else {
-                        "ban remains — immediate manual unban required"
-                    };
-                    let case = store::case(
-                        &data.db,
-                        data.guild.get(),
-                        member.user.id.get(),
-                        bot_id.get(),
-                        "honeypot",
-                        outcome,
-                    )
-                    .await;
-                    let summary = format!(
-                        "Honeypot: member {} in {} • {outcome}. Recipient DM delivered: {}. Case saved: {}",
-                        member.user.id,
-                        m.channel_id,
-                        dm.is_ok(),
-                        case.is_ok()
-                    );
-                    log(&ctx.http, data, summary.clone()).await;
-                    if let Ok(owner) = guild.owner_id.to_user(&ctx.http).await {
-                        let _ = owner
-                            .direct_message(
-                                &ctx.http,
-                                s::CreateMessage::new()
-                                    .embed(
-                                        s::CreateEmbed::new()
-                                            .title("ELVNX / SAFETY ALERT")
-                                            .description(summary)
-                                            .color(0x111111),
-                                    )
-                                    .allowed_mentions(s::CreateAllowedMentions::new()),
-                            )
-                            .await;
-                    }
-                    return Ok(true);
-                }
-            }
-        }
         s::FullEvent::VoiceStateUpdate { old: _, new }
             if new.guild_id == Some(data.guild) && cfg.activity_tracking =>
         {
@@ -816,7 +661,7 @@ pub async fn gateway(ctx: &s::Context, event: &s::FullEvent, data: &Data) -> Res
                             &ctx.http,
                             s::CreateMessage::new()
                                 .embed(
-                                    s::CreateEmbed::new()
+                                    crate::emoji::embed()
                                         .title("ELVNX / SAFETY ALERT")
                                         .description(reason)
                                         .color(0x111111),
@@ -874,7 +719,7 @@ async fn tick(
         if claim.rows_affected() > 0 {
             let message = s::CreateMessage::new()
                 .embed(
-                    s::CreateEmbed::new()
+                    crate::emoji::embed()
                         .title("ELVNX / DAILY SIGNAL")
                         .description(format!("“{}”\n— ELVNX", quote_for(day as u64)))
                         .footer(s::CreateEmbedFooter::new(

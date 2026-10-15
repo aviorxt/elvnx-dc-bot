@@ -96,7 +96,66 @@ pub fn rules_cover(server: &str, date: &str) -> Result<Vec<u8>, Error> {
         ..Default::default()
     };
     let tree = resvg::usvg::Tree::from_str(&svg, &options)?;
-    let mut pixmap = resvg::tiny_skia::Pixmap::new(1200, 420).ok_or("Image allocation failed")?;
+    let mut pixmap = resvg::tiny_skia::Pixmap::new(1200, 420)
+        .ok_or_else(|| crate::errors::user("Image allocation failed"))?;
+    resvg::render(
+        &tree,
+        resvg::tiny_skia::Transform::identity(),
+        &mut pixmap.as_mut(),
+    );
+    Ok(pixmap.encode_png()?)
+}
+
+pub struct MusicCard<'a> {
+    pub title: &'a str,
+    pub artist: &'a str,
+    pub status: &'a str,
+    pub elapsed: &'a str,
+    pub duration: &'a str,
+    pub progress: f64,
+    pub volume: u8,
+    pub repeat: &'a str,
+    pub listeners: usize,
+    pub upcoming: &'a [String],
+}
+pub fn music(card: &MusicCard<'_>) -> Result<Vec<u8>, Error> {
+    let title = fit(card.title, 59);
+    let first = title.chars().take(30).collect::<String>();
+    let second = title.chars().skip(30).collect::<String>();
+    let progress = if card.progress.is_finite() {
+        card.progress.clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+    let width = 1090.0 * progress;
+    let queue = if card.upcoming.is_empty() {
+        vec!["Your next discovery starts with /play".into()]
+    } else {
+        card.upcoming.iter().take(3).cloned().collect()
+    };
+    let next=queue.iter().enumerate().map(|(i,title)|format!(r##"<text x="58" y="{}" font-family="IBM Plex Mono" font-size="15" fill="#b6b6b6">{:02} / {}</text>"##,476+i*30,i+1,xml(&fit(title,59)))).collect::<String>();
+    let svg = format!(
+        r##"<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="600"><defs><pattern id="dots" width="22" height="22" patternUnits="userSpaceOnUse"><circle cx="2" cy="2" r=".65" fill="#292929"/></pattern><clipPath id="title"><rect x="52" y="119" width="744" height="135"/></clipPath></defs><rect width="1200" height="600" fill="#080808"/><rect width="1200" height="600" fill="url(#dots)"/><path d="M25 27Q590 16 1175 25L1171 571Q600 582 27 573Z" stroke="#555" fill="none"/><text x="54" y="66" font-family="IBM Plex Mono" font-size="13" letter-spacing="2.4" fill="#aaa">ELVNX / LISTENING ROOM</text><rect x="52" y="87" width="122" height="26" rx="13" fill="#eee"/><text x="113" y="105" text-anchor="middle" font-family="IBM Plex Mono" font-size="12" fill="#111">{status}</text><g clip-path="url(#title)" font-family="Space Grotesk" font-size="43" font-weight="700" fill="#f4f4f4"><text x="52" y="168">{first}</text><text x="52" y="220">{second}</text></g><text x="56" y="257" font-family="Space Grotesk" font-size="20" fill="#aaa">{artist}</text><path d="M56 275Q353 263 615 277M75 282Q333 271 497 281" stroke="#aaa" fill="none"/><g transform="translate(984 201)"><circle r="137" fill="#151515" stroke="#777"/><circle r="118" fill="none" stroke="#333"/><circle r="103" fill="none" stroke="#292929"/><circle r="87" fill="none" stroke="#333"/><circle r="61" fill="#ececec"/><text x="0" y="13" text-anchor="middle" font-family="Space Grotesk" font-size="38" font-weight="700" fill="#101010">11X</text><circle r="5" fill="#111"/><path d="M-93 -109Q-13 -166 94 -113M-120 83Q-101 109 -80 117" fill="none" stroke="#aaa"/><path d="M134 -116L151 -129L141 -105L162 -106L145 -90L149 -72L130 -86L111 -83L120 -101L109 -118Z" fill="#080808" stroke="#ddd" stroke-width="2"/></g><g font-family="IBM Plex Mono" font-size="12" fill="#bbb"><text x="57" y="317">VOL / {volume}%</text><text x="241" y="317">LOOP / {repeat}</text><text x="473" y="317">LISTENERS / {listeners}</text></g><text x="902" y="349" font-family="Kalam" font-size="20" fill="#ccc" transform="rotate(-3 902 349)">a little louder. a little closer.</text><rect x="55" y="371" width="1090" height="5" rx="2.5" fill="#333"/><rect x="55" y="371" width="{width:.2}" height="5" rx="2.5" fill="#eee"/><circle cx="{knob:.2}" cy="373.5" r="6" fill="#eee"/><g font-family="IBM Plex Mono" font-size="12" fill="#aaa"><text x="55" y="404">{elapsed}</text><text x="1145" y="404" text-anchor="end">{duration}</text><text x="56" y="446" letter-spacing="2">UP NEXT /</text></g>{next}<text x="1145" y="551" text-anchor="end" font-family="IBM Plex Mono" font-size="11" fill="#777">AVRXT.DEV / 11X</text></svg>"##,
+        status = xml(card.status),
+        first = xml(&first),
+        second = xml(&second),
+        artist = xml(&fit(card.artist, 52)),
+        volume = card.volume.min(100),
+        repeat = xml(card.repeat),
+        listeners = card.listeners,
+        width = width,
+        knob = 55.0 + width,
+        elapsed = xml(card.elapsed),
+        duration = xml(card.duration),
+        next = next
+    );
+    let options = resvg::usvg::Options {
+        fontdb: fonts(),
+        ..Default::default()
+    };
+    let tree = resvg::usvg::Tree::from_str(&svg, &options)?;
+    let mut pixmap = resvg::tiny_skia::Pixmap::new(1200, 600)
+        .ok_or_else(|| crate::errors::user("Image allocation failed"))?;
     resvg::render(
         &tree,
         resvg::tiny_skia::Transform::identity(),
@@ -137,7 +196,8 @@ pub fn render(
         ..Default::default()
     };
     let tree = resvg::usvg::Tree::from_str(&svg, &options)?;
-    let mut pixmap = resvg::tiny_skia::Pixmap::new(850, 470).ok_or("Image allocation failed")?;
+    let mut pixmap = resvg::tiny_skia::Pixmap::new(850, 470)
+        .ok_or_else(|| crate::errors::user("Image allocation failed"))?;
     resvg::render(
         &tree,
         resvg::tiny_skia::Transform::identity(),
