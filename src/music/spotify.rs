@@ -43,10 +43,11 @@ async fn metadata(identifier: &str) -> Result<Vec<Metadata>, Error> {
     // identifier has already passed the exact-host, path and 22-character ID checks.
     let path = identifier.strip_prefix("https://open.spotify.com/")
         .ok_or_else(|| crate::errors::user("Invalid Spotify link"))?;
-    let client = reqwest::Client::builder()
+    static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+    let client=CLIENT.get_or_init(||reqwest::Client::builder()
         .user_agent("ELVNX-public-metadata/1.0")
         .redirect(reqwest::redirect::Policy::none())
-        .timeout(Duration::from_secs(15)).build()?;
+        .timeout(Duration::from_secs(15)).build().expect("valid public Spotify metadata client"));
     let mut response = client.get(format!("https://open.spotify.com/embed/{path}")).send().await?
         .error_for_status().map_err(|_| crate::errors::user("Spotify metadata could not be loaded. Use a public link or try again later."))?;
     let mut bytes = Vec::new();

@@ -373,7 +373,10 @@ impl Service {
         if let Some(paused)=native_pause_action(&payload) {
             let direct=self.state.lock().await.current.as_ref().and_then(|r|r.track.info.uri.as_deref()).is_some_and(|u|u.starts_with("https://open.spotify.com/track/"));
             if direct {
-                reqwest::Client::new().post(if paused {"http://127.0.0.1:3680/pause"} else {"http://127.0.0.1:3680/resume"})
+                {
+                    static BRIDGE_CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+                    BRIDGE_CLIENT.get_or_init(reqwest::Client::new)
+                }.post(if paused {"http://127.0.0.1:3680/pause"} else {"http://127.0.0.1:3680/resume"})
                     .timeout(Duration::from_secs(10)).send().await?.error_for_status()?;
             }
         }
@@ -668,18 +671,15 @@ impl Service {
             })
             .unwrap_or(0.0);
         let source_artist=state.current.as_ref().map(|r|format!("{} · {}",artist,audio_source(&r.track.info))).unwrap_or_else(||artist.to_string());
-        let png = crate::cards::music(&crate::cards::MusicCard {
-            title,
-            artist: &source_artist,
-            status,
-            elapsed: &elapsed,
-            duration: &duration,
-            progress,
-            volume: state.volume,
-            repeat: repeat_label(state.repeat),
-            listeners,
-            upcoming: &upcoming,
-        })?;
+        let render_title=title.to_string();
+        let render_status=status.to_string();
+        let render_volume=state.volume;
+        let render_repeat=repeat_label(state.repeat);
+        let png = tokio::task::spawn_blocking(move ||crate::cards::music(&crate::cards::MusicCard {
+            title: &render_title, artist: &source_artist, status: &render_status,
+            elapsed: &elapsed, duration: &duration, progress, volume: render_volume,
+            repeat: render_repeat, listeners, upcoming: &upcoming,
+        })).await??;
         let embed = player_embed(&state, listeners);
         let components = player_controls(&state);
         let file = s::CreateAttachment::bytes(png, "listening-room.png");

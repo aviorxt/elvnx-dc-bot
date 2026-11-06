@@ -8,7 +8,7 @@ pub async fn message(data: &crate::Data, m: &s::Message) -> Result<(), Error> {
     {
         return Ok(());
     }
-    let mut tx = data.db.begin().await?;
+    let mut tx = data.db.begin_with("BEGIN IMMEDIATE").await?;
     if sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM activity_optout WHERE guild=? AND user=?")
         .bind(data.guild.to_string())
         .bind(m.author.id.to_string())
@@ -57,7 +57,7 @@ pub async fn voice(
     seconds: i64,
     end: i64,
 ) -> Result<(), Error> {
-    let mut tx = db.begin().await?;
+    let mut tx = db.begin_with("BEGIN IMMEDIATE").await?;
     if sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM activity_optout WHERE guild=? AND user=?")
         .bind(guild.to_string())
         .bind(user.to_string())

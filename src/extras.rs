@@ -545,6 +545,7 @@ pub fn start_scheduler(
 ) {
     tokio::spawn(async move {
         let mut ticker = tokio::time::interval(std::time::Duration::from_secs(30));
+        ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         loop {
             ticker.tick().await;
             if let Err(error) = tick(&http, &db, guild, &voices).await {

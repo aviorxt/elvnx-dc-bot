@@ -969,7 +969,7 @@ async fn privacy(
                 return reply(ctx,"Use confirm:true to erase your message/voice counters and stop future activity counting.").await;
             }
             let mut voices = ctx.data().voices.lock().await;
-            let mut tx = ctx.data().db.begin().await?;
+            let mut tx = ctx.data().db.begin_with("BEGIN IMMEDIATE").await?;
             sqlx::query("INSERT OR IGNORE INTO activity_optout VALUES(?,?)")
                 .bind(&guild)
                 .bind(&user)

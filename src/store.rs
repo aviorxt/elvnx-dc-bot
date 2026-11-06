@@ -120,6 +120,14 @@ pub async fn connect(url: &str) -> Result<SqlitePool, sqlx::Error> {
          CREATE TABLE IF NOT EXISTS voice_room_limits(guild TEXT NOT NULL,user TEXT NOT NULL,kind TEXT NOT NULL,window INTEGER NOT NULL,count INTEGER NOT NULL,PRIMARY KEY(guild,user,kind));
          CREATE TABLE IF NOT EXISTS voice_rooms(guild TEXT NOT NULL,channel TEXT PRIMARY KEY,owner TEXT NOT NULL);"
     ).execute(&db).await?;
+    sqlx::raw_sql("CREATE INDEX IF NOT EXISTS daily_activity_retention ON daily_activity(day);
+        CREATE INDEX IF NOT EXISTS seen_messages_retention ON seen_messages(created);
+        CREATE INDEX IF NOT EXISTS reminders_due ON reminders(guild,state,due,id);
+        CREATE INDEX IF NOT EXISTS polls_refresh ON polls(guild,state,rendered,id);
+        CREATE INDEX IF NOT EXISTS scheduled_posts_due ON scheduled_posts(guild,state,due);
+        CREATE INDEX IF NOT EXISTS music_request_limits_retention ON music_request_limits(last);
+        CREATE INDEX IF NOT EXISTS voice_invites_retention ON voice_room_invites(created);")
+        .execute(&db).await?;
     Ok(db)
 }
 
@@ -239,5 +247,32 @@ mod tests {
                 .await
                 .is_err()
         );
+    }
+}
+
+#[cfg(test)]
+mod optimization_regression_tests {
+    #[tokio::test]
+    async fn concurrent_activity_writes_keep_every_second() {
+        let file=std::env::temp_dir().join(format!("elvnx-concurrency-{}-{}.db",std::process::id(),std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        let db=super::connect(&format!("sqlite://{}",file.display())).await.unwrap();
+        let mut jobs=Vec::new();
+        for _ in 0..8 {
+            let pool=db.clone();
+            jobs.push(tokio::spawn(async move {
+                for _ in 0..15 { crate::daily::voice(&pool,1,2,1,100000).await.unwrap(); }
+            }));
+        }
+        for job in jobs { job.await.unwrap(); }
+        let total:i64=sqlx::query_scalar("SELECT voice FROM activity WHERE guild='1' AND user='2'").fetch_one(&db).await.unwrap();
+        assert_eq!(total,120);
+        let detail:Vec<String>=sqlx::query_scalar("SELECT detail FROM pragma_query_plan('SELECT * FROM seen_messages WHERE created<1')").fetch_all(&db).await.unwrap_or_default();
+        // Query-plan validation is performed below using SQLite EXPLAIN directly.
+        let _=detail;
+        let rows=sqlx::query("EXPLAIN QUERY PLAN SELECT * FROM seen_messages WHERE created<1").fetch_all(&db).await.unwrap();
+        use sqlx::Row;
+        assert!(rows.iter().any(|r|r.get::<String,_>("detail").contains("seen_messages_retention")));
+        db.close().await;
+        let _=std::fs::remove_file(&file);
     }
 }

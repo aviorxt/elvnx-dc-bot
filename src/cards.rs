@@ -51,11 +51,10 @@ pub async fn avatar(user: &s::User) -> Option<String> {
     {
         return None;
     }
-    let client = reqwest::Client::builder()
+    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+    let client=CLIENT.get_or_init(||reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(5))
-        .redirect(reqwest::redirect::Policy::none())
-        .build()
-        .ok()?;
+        .redirect(reqwest::redirect::Policy::none()).build().expect("valid avatar client"));
     let mut response = client.get(url).send().await.ok()?.error_for_status().ok()?;
     if response.content_length().is_some_and(|n| n > 1_000_000) {
         return None;
@@ -88,9 +87,10 @@ pub async fn avatar(user: &s::User) -> Option<String> {
 }
 // Shared cinematic shell. Dynamic content is always escaped before insertion.
 fn shell(width: u32, height: u32) -> String {
-    let background = base64::engine::general_purpose::STANDARD.encode(include_bytes!(
+    static BACKGROUND: OnceLock<String> = OnceLock::new();
+    let background = BACKGROUND.get_or_init(||base64::engine::general_purpose::STANDARD.encode(include_bytes!(
         "../assets/status/elvnx-purple-status-background.png"
-    ));
+    )));
     format!(
         r##"<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}"><defs><linearGradient id="silver" x2="0" y2="1"><stop stop-color="#ffffff"/><stop offset=".5" stop-color="#e9e1fc"/><stop offset="1" stop-color="#ada0c8"/></linearGradient><linearGradient id="violet"><stop stop-color="#8b35ff"/><stop offset="1" stop-color="#d4bcff"/></linearGradient></defs><image width="{width}" height="{height}" href="data:image/png;base64,{background}" preserveAspectRatio="xMidYMid slice"/><rect width="{width}" height="{height}" fill="#08040f" opacity=".65"/><path d="M18 46L46 18H{right}L{edge} 46V{bottom}L{right} {base}H46L18 {bottom}Z" fill="none" stroke="#8b35ff" stroke-width="2"/><path d="M46 23H165M{accent} {base}H{right}" stroke="#d4bcff" stroke-width="4"/>"##,
         right = width - 46,
@@ -131,7 +131,7 @@ pub fn music(card: &MusicCard<'_>) -> Result<Vec<u8>, Error> {
     } else {
         0.0
     };
-    let width = 1072.0 * progress;
+    let width = (1072.0 * progress).max(0.01);
     let queue = if card.upcoming.is_empty() {
         vec!["Your next discovery starts with /play".into()]
     } else {
