@@ -2,6 +2,7 @@ mod favorites;
 mod recap;
 mod requests;
 mod stay;
+mod spotify;
 use crate::{Context, Data, Error, reply, serenity as s};
 use futures_util::{SinkExt, StreamExt};
 use rand::seq::SliceRandom;
@@ -127,6 +128,7 @@ pub struct Service {
     session: Mutex<Option<String>>,
     state: Mutex<State>,
     operations: Mutex<()>,
+    request_generation: std::sync::atomic::AtomicU64,
     panel_lock: Mutex<()>,
     pending_panels: Mutex<Vec<(s::ChannelId, s::MessageId)>>,
     voice: Notify,
@@ -174,6 +176,7 @@ impl Service {
             session: Mutex::new(None),
             state: Mutex::new(State::default()),
             operations: Mutex::new(()),
+            request_generation: std::sync::atomic::AtomicU64::new(0),
             panel_lock: Mutex::new(()),
             pending_panels: Mutex::new(Vec::new()),
             voice: Notify::new(),
@@ -380,15 +383,17 @@ impl Service {
     }
     async fn load(&self, query: &str, source: Source) -> Result<Vec<Track>, Error> {
         let identifier = identifier(query, source)?;
+        if identifier.starts_with("https://open.spotify.com/") {
+            return tokio::time::timeout(Duration::from_secs(90), spotify::load(self, &identifier)).await
+                .map_err(|_|crate::errors::user("Spotify matching timed out. Try a smaller playlist or individual track."))?;
+        }
+        parse_tracks(self.load_identifier(&identifier).await?)
+    }
+    async fn load_identifier(&self, identifier: &str) -> Result<Value, Error> {
         let mut url = reqwest::Url::parse(&format!("{}/v4/loadtracks", self.url))?;
-        url.query_pairs_mut().append_pair("identifier", &identifier);
-        let path = format!(
-            "/v4/loadtracks?{}",
-            url.query()
-                .ok_or_else(|| crate::errors::user("Missing query"))?
-        );
-        let value = self.request(reqwest::Method::GET, &path, None).await?;
-        parse_tracks(value)
+        url.query_pairs_mut().append_pair("identifier", identifier);
+        let path = format!("/v4/loadtracks?{}", url.query().ok_or_else(|| crate::errors::user("Missing query"))?);
+        self.request(reqwest::Method::GET, &path, None).await
     }
     fn voice_state(&self, ctx: &s::Context, channel: Option<s::ChannelId>) {
         ctx.shard.websocket_message(Message::Text(json!({"op":4,"d":{"guild_id":self.guild.to_string(),"channel_id":channel.map(|c|c.to_string()),"self_mute":false,"self_deaf":true}}).to_string()));
@@ -486,6 +491,7 @@ impl Service {
         }
     }
     async fn stop(&self, ctx: &s::Context) -> Result<(), Error> {
+        self.request_generation.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         let (summary, destination) = {
             let mut state = self.state.lock().await;
             let mut summary = state.summary.take();
@@ -817,12 +823,27 @@ pub enum Source {
     Soundcloud,
     YouTube,
 }
+fn music_bitrate(tier: s::PremiumTier) -> u32 {
+    match tier {
+        s::PremiumTier::Tier1 => 128000,
+        s::PremiumTier::Tier2 => 256000,
+        s::PremiumTier::Tier3 => 384000,
+        _ => 96000,
+    }
+}
 fn identifier(query: &str, source: Source) -> Result<String, Error> {
     let query = query.trim();
     if query.is_empty() || query.chars().count() > 300 {
         return Err(crate::errors::user(
             "Enter a title or supported HTTPS link, up to 300 characters",
         ));
+    }
+    if let Some(uri) = query.strip_prefix("spotify:") {
+        let parts: Vec<_> = uri.split(':').collect();
+        if parts.len() != 2 {
+            return Err(crate::errors::user("Use a Spotify track, album or playlist link"));
+        }
+        return identifier(&format!("https://open.spotify.com/{}/{}", parts[0], parts[1]), source);
     }
     if query.contains("://") {
         let url = reqwest::Url::parse(query)?;
@@ -831,7 +852,7 @@ fn identifier(query: &str, source: Source) -> Result<String, Error> {
             || !url.username().is_empty()
             || url.password().is_some()
             || url.port().is_some()
-            || ![
+            || !(host == "open.spotify.com" || [
                 "youtube.com",
                 "youtu.be",
                 "soundcloud.com",
@@ -839,11 +860,35 @@ fn identifier(query: &str, source: Source) -> Result<String, Error> {
                 "twitch.tv",
             ]
             .iter()
-            .any(|domain| host == *domain || host.ends_with(&format!(".{domain}")))
+            .any(|domain| host == *domain || host.ends_with(&format!(".{domain}"))))
         {
             return Err(crate::errors::user(
-                "Use a YouTube, SoundCloud, Bandcamp or Twitch HTTPS link",
+                "Use a Spotify, YouTube, SoundCloud, Bandcamp or Twitch HTTPS link",
             ));
+        }
+        if host == "open.spotify.com" {
+            let segments: Vec<_> = url.path_segments().into_iter().flatten().collect();
+            let parts = if segments.first().is_some_and(|p| p.starts_with("intl-")) {
+                &segments[1..]
+            } else {
+                &segments[..]
+            };
+            if parts.len() != 2
+                || !matches!(parts[0], "track" | "album" | "playlist")
+                || parts[1].len() != 22
+                || !parts[1].bytes().all(|b| b.is_ascii_alphanumeric())
+            {
+                return Err(crate::errors::user("Use a Spotify track, album or playlist link. Private playlists and podcast episodes are not supported."));
+            }
+            return Ok(format!("https://open.spotify.com/{}/{}", parts[0], parts[1]));
+        }
+        if (host == "youtube.com" || host.ends_with(".youtube.com") || host == "youtu.be")
+            && let Some((_, list)) = url.query_pairs().find(|(key, _)| key == "list")
+        {
+            if !(10..=128).contains(&list.len()) || !list.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-') {
+                return Err(crate::errors::user("Invalid YouTube playlist link"));
+            }
+            return Ok(format!("https://www.youtube.com/playlist?list={list}"));
         }
         Ok(url.into())
     } else {
@@ -1272,6 +1317,7 @@ async fn play(
     #[description = "Song title or supported HTTPS link"] query: String,
     #[description = "Search source; default YouTube"] source: Option<Source>,
 ) -> Result<(), Error> {
+    ctx.defer_ephemeral().await?;
     let node = service(ctx)?;
     let text = requests::request(
         ctx.serenity_context(),
@@ -1362,6 +1408,13 @@ async fn enqueue_user(
         .is_some_and(|id| id != channel)
     {
         return Err(crate::errors::user("Join the bot's voice channel first"));
+    }
+    let desired_bitrate = music_bitrate(guild.premium_tier);
+    if voice.bitrate.unwrap_or(64000) < desired_bitrate
+        && guild.user_permissions_in(&voice, &bot).contains(s::Permissions::MANAGE_CHANNELS)
+        && let Err(error) = channel.edit(&ctx.http, s::EditChannel::new().bitrate(desired_bitrate)).await
+    {
+        tracing::warn!(%error, "Could not raise music channel bitrate; keeping current bitrate");
     }
     if tracks.is_empty() {
         return Err(crate::errors::user("No playable tracks were found."));
@@ -2389,6 +2442,35 @@ mod tests {
             identifier("hello", Source::Soundcloud).unwrap(),
             "scsearch:hello"
         );
+    }
+    #[test]
+    fn youtube_playlist_and_video_in_playlist_links_load_the_collection() {
+        let list="PLFgquLnL59alCl_2TQvOiD5Vgm1hCaGSI";
+        let expected=format!("https://www.youtube.com/playlist?list={list}");
+        for query in [format!("{expected}&si=tracking"),format!("https://www.youtube.com/watch?v=abc&list={list}&index=3"),format!("https://youtu.be/abc?list={list}")] {
+            assert_eq!(identifier(&query,Source::YouTube).unwrap(),expected);
+        }
+        assert!(identifier("https://www.youtube.com/playlist?list=bad/host",Source::YouTube).is_err());
+    }
+    #[test]
+    fn spotify_links_are_normalized_without_tracking_parameters() {
+        let id = "4cOdK2wGLETKBW3PvgPWqT";
+        for kind in ["track", "album", "playlist"] {
+            let expected = format!("https://open.spotify.com/{kind}/{id}");
+            for query in [format!("{expected}?si=tracking#fragment"), format!("spotify:{kind}:{id}"), format!("https://open.spotify.com/intl-en/{kind}/{id}")] {
+                assert_eq!(identifier(&query, Source::YouTube).unwrap(), expected);
+            }
+        }
+        for query in ["https://open.spotify.com.evil.org/track/4cOdK2wGLETKBW3PvgPWqT", "https://user:pass@open.spotify.com/track/4cOdK2wGLETKBW3PvgPWqT", "https://open.spotify.com/episode/4cOdK2wGLETKBW3PvgPWqT", "https://open.spotify.com/track/short", "https://evil.open.spotify.com/track/4cOdK2wGLETKBW3PvgPWqT", "spotify:track:bad:extra"] {
+            assert!(identifier(query, Source::YouTube).is_err(), "{query}");
+        }
+    }
+    #[test]
+    fn music_quality_uses_supported_discord_bitrate_ceiling() {
+        assert_eq!(music_bitrate(s::PremiumTier::Tier0), 96000);
+        assert_eq!(music_bitrate(s::PremiumTier::Tier1), 128000);
+        assert_eq!(music_bitrate(s::PremiumTier::Tier2), 256000);
+        assert_eq!(music_bitrate(s::PremiumTier::Tier3), 384000);
     }
     #[test]
     fn empty_and_failed_loads_do_not_create_fake_tracks() {

@@ -5,7 +5,9 @@ The Rust bot uses Lavalink 4.2.2 with youtube-source upstream revision `2be8e542
 only to localhost. No inbound music port is required on AWS.
 
 `/play` accepts a search phrase or supported HTTPS media URL and defaults to
-YouTube search. Join a normal voice channel first. The bot needs View Channel,
+YouTube search. Public Spotify track/album/playlist links and YouTube playlist
+links are supported; see [SPOTIFY.md](SPOTIFY.md) for matching, limits and examples.
+Join a normal voice channel first. The bot needs View Channel,
 Connect, Speak, and View/Send/Embed/Attach permissions for the music panel.
 Stage channels are unsupported. Same-voice-channel membership is checked on
 every playback control. Queues hold at most 50 tracks; volume is capped at 100.

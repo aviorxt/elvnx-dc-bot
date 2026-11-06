@@ -61,7 +61,6 @@ pub(super) async fn request(
             "Wait five seconds between music requests, including /play and Add track.",
         ));
     }
-    let _guard = node.operations.lock().await;
     let cfg = crate::store::settings(&node.db, node.guild.get()).await?;
     let voice = voice_channel(ctx, node.guild, user)
         .ok_or_else(|| crate::errors::user("Join a voice channel before requesting a song."))?;
@@ -109,6 +108,7 @@ pub(super) async fn request(
             "You need access to the music channel and completed membership screening.",
         ));
     }
+    let generation = node.request_generation.load(std::sync::atomic::Ordering::SeqCst);
     let query = query.trim();
     let query = if query.starts_with("<https://") && query.ends_with('>') {
         &query[1..query.len() - 1]
@@ -116,6 +116,12 @@ pub(super) async fn request(
         query
     };
     let tracks = node.load(query, source).await?;
+    // Metadata lookups must not block stop, skip or volume controls.
+    // enqueue_user rechecks membership, permissions, voice channel and queue capacity.
+    let _guard = node.operations.lock().await;
+    if generation != node.request_generation.load(std::sync::atomic::Ordering::SeqCst) {
+        return Err(crate::errors::user("Music was stopped while loading. Submit a new request to start again."));
+    }
     enqueue_user(ctx, node, user, text, tracks).await
 }
 async fn bound(node: &Service, b: &s::ComponentInteraction) -> Result<bool, Error> {

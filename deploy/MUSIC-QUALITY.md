@@ -17,10 +17,11 @@ Opus quality 10 and high-quality resampling apply when conversion is needed. Thi
 does not turn a compressed YouTube source into lossless or guaranteed 320 kbps audio.
 
 New join-to-create rooms use the server's current boost-tier bitrate ceiling instead
-of a fixed 64 kbps. The owner can still lower it in the voice panel. This server
-currently has boost tier 0, with a 96 kbps normal voice-channel ceiling; the bot's
-current music channel is raised only to that supported ceiling. Existing other
-voice channels and owner-selected room settings are not bulk edited.
+of a fixed 64 kbps. When music is requested, the bot also raises the selected voice
+channel to the supported ceiling if it has Manage Channels. Other channels are
+not bulk edited. Tier 0/1/2/3 limits are 96/128/256/384 kbps. This server currently
+has boost tier 0, so its maximum is 96 kbps. If changing the channel bitrate fails,
+the bot keeps the existing bitrate and continues playback.
 
 Sources:
 - https://lavalink.dev/configuration/config/file
