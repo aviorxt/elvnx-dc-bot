@@ -63,7 +63,10 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as e:
             print('Spotify bridge:',type(e).__name__,str(e)[:150],flush=True)
         finally:
-            if capture:capture.terminate();capture.wait(timeout=5)
+            if capture:
+                capture.terminate()
+                try:capture.wait(timeout=2)
+                except subprocess.TimeoutExpired:capture.kill();capture.wait(timeout=2)
             try:call('Pause')
             except Exception:pass
             active_session=None;lock.release()
