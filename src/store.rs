@@ -17,6 +17,10 @@ pub struct Settings {
     pub afk_move_channel: Option<u64>,
     pub counting_channel: Option<u64>,
     pub counting_disabled: bool,
+    pub word_chain_channel: Option<u64>,
+    pub word_chain_panel: Option<u64>,
+    pub guess_game_channel: Option<u64>,
+    pub guess_game_panel: Option<u64>,
     pub join_to_create: Option<u64>,
     pub voice_panel: Option<u64>,
     pub activity_kind: String,
@@ -90,12 +94,23 @@ pub async fn connect(url: &str) -> Result<SqlitePool, sqlx::Error> {
          CREATE TABLE IF NOT EXISTS scheduled_quotes(guild TEXT NOT NULL, day INTEGER NOT NULL, state TEXT NOT NULL, PRIMARY KEY(guild,day));
          CREATE TABLE IF NOT EXISTS outgoing_dms(guild TEXT NOT NULL,user TEXT NOT NULL,channel TEXT NOT NULL,message TEXT PRIMARY KEY);
          CREATE TABLE IF NOT EXISTS counting(guild TEXT PRIMARY KEY,current INTEGER NOT NULL DEFAULT 0,last_user TEXT);
+         CREATE TABLE IF NOT EXISTS personal_channels(guild TEXT NOT NULL,channel TEXT PRIMARY KEY,owner TEXT NOT NULL,role TEXT NOT NULL,parent TEXT NOT NULL,panel TEXT,value TEXT NOT NULL);
+         CREATE TABLE IF NOT EXISTS personal_sessions(nonce TEXT PRIMARY KEY,guild TEXT NOT NULL,channel TEXT NOT NULL,actor TEXT NOT NULL,panel TEXT NOT NULL,action TEXT NOT NULL,expires INTEGER NOT NULL);
+         CREATE TABLE IF NOT EXISTS personal_limits(channel TEXT NOT NULL,actor TEXT NOT NULL,at INTEGER NOT NULL,PRIMARY KEY(channel,actor));
+         CREATE TABLE IF NOT EXISTS guess_game(channel TEXT PRIMARY KEY,target INTEGER NOT NULL,lower_bound INTEGER NOT NULL DEFAULT 1,upper_bound INTEGER NOT NULL DEFAULT 1000,attempts INTEGER NOT NULL DEFAULT 0,round INTEGER NOT NULL DEFAULT 1,last_message INTEGER NOT NULL DEFAULT 0);
+         CREATE TABLE IF NOT EXISTS guess_game_scores(channel TEXT NOT NULL,user TEXT NOT NULL,wins INTEGER NOT NULL DEFAULT 0,guesses INTEGER NOT NULL DEFAULT 0,last_at INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(channel,user));
+         CREATE TABLE IF NOT EXISTS word_chain(channel TEXT PRIMARY KEY,last_word TEXT NOT NULL DEFAULT 'violet',last_user TEXT,last_message INTEGER NOT NULL DEFAULT 0,turns INTEGER NOT NULL DEFAULT 0,round INTEGER NOT NULL DEFAULT 1);
+         CREATE TABLE IF NOT EXISTS word_chain_used(channel TEXT NOT NULL,word TEXT NOT NULL,PRIMARY KEY(channel,word));
+         CREATE TABLE IF NOT EXISTS word_chain_scores(channel TEXT NOT NULL,user TEXT NOT NULL,points INTEGER NOT NULL DEFAULT 0,last_at INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(channel,user));
+         CREATE TABLE IF NOT EXISTS word_chain_feedback(channel TEXT NOT NULL,user TEXT NOT NULL,at INTEGER NOT NULL,PRIMARY KEY(channel,user));
          CREATE TABLE IF NOT EXISTS lockdowns(guild TEXT NOT NULL,channel TEXT NOT NULL,overwrites TEXT NOT NULL,PRIMARY KEY(guild,channel));
          CREATE TABLE IF NOT EXISTS music_favorites(guild TEXT NOT NULL,url TEXT NOT NULL,user TEXT NOT NULL,created INTEGER NOT NULL,PRIMARY KEY(guild,url));
          CREATE TABLE IF NOT EXISTS music_favorite_panels(guild TEXT PRIMARY KEY,channel TEXT NOT NULL,message TEXT NOT NULL);
          CREATE TABLE IF NOT EXISTS music_request_receipts(id TEXT PRIMARY KEY,created INTEGER NOT NULL);
          CREATE TABLE IF NOT EXISTS music_request_panels(guild TEXT PRIMARY KEY,channel TEXT NOT NULL,message TEXT NOT NULL);
          CREATE TABLE IF NOT EXISTS music_request_limits(guild TEXT NOT NULL,user TEXT NOT NULL,kind TEXT NOT NULL,last INTEGER NOT NULL,PRIMARY KEY(guild,user,kind));
+         CREATE TABLE IF NOT EXISTS online_info_messages(guild TEXT PRIMARY KEY,channel TEXT NOT NULL,message TEXT NOT NULL,phase TEXT NOT NULL);
+         CREATE TABLE IF NOT EXISTS online_info_cleanup(guild TEXT NOT NULL,channel TEXT NOT NULL,message TEXT NOT NULL,PRIMARY KEY(guild,channel,message));
          CREATE TABLE IF NOT EXISTS activity_panels(guild TEXT PRIMARY KEY,channel TEXT NOT NULL,message TEXT NOT NULL,version TEXT NOT NULL);
          CREATE TABLE IF NOT EXISTS audit_receipts(guild TEXT NOT NULL,id TEXT NOT NULL,created INTEGER NOT NULL,PRIMARY KEY(guild,id));
          CREATE TABLE IF NOT EXISTS voice_room_state(channel TEXT PRIMARY KEY,guild TEXT NOT NULL,value TEXT NOT NULL);

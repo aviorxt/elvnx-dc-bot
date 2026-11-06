@@ -221,9 +221,9 @@ impl Service {
         let mut embed = crate::emoji::embed()
             .title("ELVNX / BOT STATUS")
             .color(if connected && db_ok {
-                0x111111
+                crate::theme::ACCENT
             } else {
-                0xbb3333
+                crate::theme::ERROR
             })
             .description(if connected && db_ok {
                 format!(
@@ -399,7 +399,7 @@ impl Service {
                 cfg.bot_message
             };
             let embed = if !cfg.enabled {
-                crate::emoji::embed().title(if music { "ELVNX / LAVALINK STATUS" } else { "ELVNX / BOT STATUS" }).description("Live updates paused. An administrator can enable /bot-status-live to resume.").color(0x111111).timestamp(s::Timestamp::now())
+                crate::emoji::embed().title(if music { "ELVNX / LAVALINK STATUS" } else { "ELVNX / BOT STATUS" }).description("Live updates paused. An administrator can enable /bot-status-live to resume.").color(crate::theme::ACCENT).timestamp(s::Timestamp::now())
             } else if music {
                 if let Some(node) = &self.music {
                     node.live_embed().await
@@ -407,7 +407,7 @@ impl Service {
                     crate::emoji::embed()
                         .title("ELVNX / LAVALINK STATUS")
                         .description("Music node is not configured.")
-                        .color(0x111111)
+                        .color(crate::theme::ACCENT)
                         .timestamp(s::Timestamp::now())
                 }
             } else {

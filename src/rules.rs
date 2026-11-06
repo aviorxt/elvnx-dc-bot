@@ -80,7 +80,7 @@ pub async fn rules(
     let mut embed = crate::emoji::embed()
         .title(format!("{} / SERVER RULES", guild.name))
         .description("A private space to build, play, watch, and share. These standards apply across text, voice, gaming, movie, and asset channels. By participating, you agree to follow them.")
-        .color(0x111111)
+        .color(crate::theme::ACCENT)
         .footer(s::CreateEmbedFooter::new("ELVNX / 11X · Read the rules. Respect the space. Contact staff if unsure."))
         .timestamp(s::Timestamp::now());
     for (title, text) in RULES {
@@ -93,7 +93,7 @@ pub async fn rules(
             s::CreateMessage::new()
                 .embeds(vec![
                     crate::emoji::embed()
-                        .color(0x111111)
+                        .color(crate::theme::ACCENT)
                         .image("attachment://rules-cover.png"),
                     embed,
                 ])

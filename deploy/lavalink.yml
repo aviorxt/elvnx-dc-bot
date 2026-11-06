@@ -18,9 +18,11 @@ lavalink:
       http: false
       local: false
     bufferDurationMs: 400
-    frameBufferDurationMs: 1000
+    frameBufferDurationMs: 5000
     playerUpdateInterval: 5
-    opusEncodingQuality: 5
+    opusEncodingQuality: 10
+    resamplingQuality: HIGH
+    useSeekGhosting: true
 plugins:
   youtube:
     enabled: true

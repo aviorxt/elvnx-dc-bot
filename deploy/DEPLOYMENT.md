@@ -1,3 +1,119 @@
+# Live update — owner-bound Personal control panels
+
+Deployed **0.14.1+build.20261015.180601** to **15.252.100.197** on 15 October 2026 at approximately 23:41 IST. Binary SHA-256: `ee458ce35f73e787c436df30d63082632b82f735ca1c220a3b4ac1607bded647`.
+
+Published eight-control violet panels in all three existing Personal rooms: AVRXT `1560352014679154811`, EBNN `1560352019833684134`, Z24X `1560352023684055191`. Controls provide Lock/Unlock, Hide/Unhide, Add/Remove member and Set/Clear status with animated custom emojis. Each room is bound to its specific owner, identity role, category and tracked bot message. Owners receive ordinary text access only; no native channel/role management permissions were granted. Current owner or Manage Server staff authorization is fetched again for each action and form submission. Unhide restores only the private identity/guest audience; everyone remains denied View Channel.
+
+One-use member/status forms are actor/server/channel/message bound, expire after 120 seconds and are cleaned every minute. Permission and topic intent persists before Discord updates; failed updates remain visibly pending for the matching explicit retry. Topic updates use topic-only payloads. Text status appears in the channel topic and panel, with mention/control-character validation. See [PERSONAL-CHANNELS.md](PERSONAL-CHANNELS.md).
+
+All **105 tests**, formatting and strict all-target Clippy passed locally and on EC2; the optimized native build and configuration/schema checks passed. Live Discord verification confirmed correct owner bindings, eight animated controls, private overwrites and no new native management privileges across all three rooms. A real owner UI test opened the status form, set Ready, then cleared it; the original topic and exact permission overwrites matched the saved snapshot afterward. The initial empty modal-prefill issue found during live testing was corrected in this patch with regression coverage. No guest access was granted for testing, and hide/lock policies were verified through regression tests rather than changing live audiences.
+
+Bot, Lavalink, cipher and presence tunnel services are active. Prior executables, private SQLite backup and original channel access snapshots are retained. Existing welcome cards, member welcome mentions, game progress, command registration and webhook destinations remain intact. No Git commit or push.
+
+---
+# Live update — Crack the Code and animated Personal rooms
+
+Deployed **0.13.0+build.20261015.170530** to EC2 on 15 October 2026 at approximately 22:39 IST. Binary SHA-256: `91de774fe5494f1a79384b1c3c858e997dd91499e2198bf5c1daa4a3c3cd55d6`.
+
+Created guess-number `1560338752285442153` under Games with Legacy-matched overwrites. Tracked rules panel `1560338776511877243` delivers the shared purple cover; initial verified bounds are 1–1000, zero attempts, round one. Verification never reads or prints the production hidden target. All 98 tests, formatting, strict Clippy and native optimized/config checks passed on Windows/EC2. Services are active with zero automatic restarts; existing counting and Word Chain configurations remain. No member activity was fabricated. See GUESS-NUMBER.md. Previous executable and root-only SQLite backup were retained.
+
+Created three private text rooms, then moved them into Personal category `1560338102533365840`: ebnn `1560336440779350057` for ebnn.me `1560334446639452281`; z24x `1560336445787607161` for z.24.x `1560334442973765664`; avr `1560336449490919525` for avr-pvt `1557908876538683402`. Category denies everyone View Channel, permits the three matching identities and the bot, and keeps normal Administrator behavior. Each channel retains its own explicit overwrite granting only its corresponding identity and the bot; sibling identities do not receive access through category synchronization. Moves and final overwrites were verified. Existing webhooks and member assignments are unchanged.
+
+Published one original animated 960x480, 80-frame, 5.6-second violet welcome GIF per room, titled AVRXT, EBNN and Z24X. Each has a moving name reveal, satin highlight, pulsing angular frame and fixed 11X seal, generated locally from the existing visual assets/fonts. Files are roughly 0.53–0.55 MiB. Discord delivery verified matching GIF URLs, dimensions and title. Posted IDs: AVRXT `1560338111823745189`, EBNN `1560338127502049281`, Z24X `1560338141834125483`. Root-only move snapshot and upload receipts are retained in `/var/backups/elvnx-bot/`. No Git commit or push.
+
+---
+# Live update — Word Chain, identity labels and GIF upload clarification
+
+Deployed **0.12.0+build.20261015.164604** on 15 October 2026 at approximately 22:19 IST. Binary SHA-256: `f87fecc0004ed5a303eeac0f0372071da914da48a1a1ece07c8f4d364c871077`.
+
+Created Word Chain channel `1560333893809213487` under Games `1560330043178229881`, with category/Legacy-matched overwrites. The tracked violet rules panel is `1560333920753557584` and delivers an 850x470 cover. Initial production state is violet, round one, zero accepted turns and zero players; no human activity or scores were fabricated. Channel/message IDs bind the game, independent of styled channel names. Existing counting progress/settings are preserved. See WORD-CHAIN.md for gameplay, validation and retention.
+
+All 95 tests, formatting and strict all-target Clippy passed on Windows and EC2. Optimized native build and configuration/schema checks passed. Live checks verified game state, actual rules/cover delivery, Legacy access, unchanged 100 guild commands plus existing globals, and active bot/Lavalink/cipher/presence services with zero automatic bot restarts. Native multi-member Discord play has not been simulated. The old executable is retained as `/opt/elvnx-bot/elvnx-bot.before-word-chain`; a root-only SQLite backup was saved before configuration migration. Routine lifecycle Restarting/Online notices completed.
+
+Four owner-requested purple roles were created unassigned, all with zero permissions: one `1560334436585971752`, devloper `1560334439849001051`, z.24.x `1560334442973765664`, ebnn.me `1560334446639452281`. Existing role permission bits and relative order were verified unchanged. These are labels; they neither transfer server ownership nor configure OAuth verification.
+
+Animated GIF uploads were already accepted and forwarded byte-for-byte by the deployed attachment path. After deployment, regression coverage was extended for image/gif, uppercase .GIF, absent/generic MIME metadata, signed ephemeral URLs and the 8 MiB boundary; the complete 95-test suite passed again locally. Only the live send-attachement command description/file-option help was patched through Discord to explicitly mention GIF/SVG; command IDs, option type, permissions and count remain unchanged. The corresponding source metadata/test update remains only as working-tree edits and does not require a bot restart. No Git commit or push.
+
+---
+# Live update — ELVNX Violet visual system
+
+Deployed **0.11.0+build.20261015.160315** to **15.252.100.197** on 15 October 2026. Binary SHA-256: `9ce392da3d13fe7b4c4a322a5b10c7f6f95ec5678856c9754af0d3c926b62e91`.
+
+Shared image templates now use cinematic purple/black art, angular violet frames, silver-white headings, Barlow Condensed ExtraBold Italic, Space Grotesk and IBM Plex Mono. This covers music, rules, welcome, insights, verification, health, events and all generic generated cards. Shared embed accent is #8b35ff; errors retain a distinct rose #ed5b9a. Server icon and bot avatar use the new reproducible 11X branding asset. Existing tracked rules, voice, music and other persistent panels were refreshed; historical posts and member DMs are not rewritten.
+
+All 80 Violet v2 application emoji are uploaded (40 static, 40 animated), with IDs embedded in the release. Animated glyphs move while their frames remain fixed. Old emoji IDs remain available for historical messages. The separate guild copy has 50 of 80 uploaded; Discord imposed a creation cooldown. The bounded one-shot `elvnx-violet-emoji-backfill.service` respects retry_after and is scheduled to retry around 16:59 UTC. It uploads only missing names and has a two-hour runtime limit. Check its journal and guild emoji count before reporting the guild pack complete. This does not affect the complete application pack already used by bot controls.
+
+Fourteen non-managed role colors match the palette. Final API verification confirms role permission bits, relative hierarchy, existing channel parents and all channel overwrites are unchanged. Discord normalized sparse numerical role positions while saving through its role editor; relative order remains identical. The server currently has no banner feature. Discord's client interface theme is controlled by each member.
+
+All 92 tests, formatting and strict all-target Clippy passed locally. Native optimized build, configuration check and all PNG previews passed on EC2. Bot, Lavalink, cipher and presence tunnel are active. Voice/music panels use Violet v2 animated controls and #8b35ff; rules content remains unchanged. Fresh SQLite backup and previous executable are retained. Root-only visual snapshots: `/var/backups/elvnx-bot/violet-theme-before.json` and `rules-before-violet.json`. No Git commit or push.
+
+---
+# Live update — public online-info lifecycle notices
+
+Deployed **0.10.0+build.20261015.154003** to **15.252.100.197** on 15 October 2026 at approximately **9:17 PM IST**. Installed SHA-256: `302980d4788af147e2dc318024bec3dc1e8b02223ed7726dc009a95644a35aef`.
+
+Created public read-only `online-info` (`1560312201833877621`) under Server-Info. Its explicit everyone overwrite permits viewing/history/reactions and denies ordinary message/thread posting; the bot has channel-scoped publishing and notification permissions. Existing Administrator behavior is unchanged. Legacy notifications target role `1554098593382531112` only; @everyone/@here and user mentions are disabled in each outgoing payload. Both destination environment fields were added to the root-only server environment while preserving all existing credentials and settings, with a prior environment backup retained.
+
+Added original purple/black artwork inspired by the provided screenshot, bundled Barlow Condensed ExtraBold Italic with its SIL OFL license, and local Rust rendering of Online/Restarting images at 1600×720 with IST timestamps and version/build metadata. The background was created using built-in image generation; full prompt and provenance are in `assets/status/DESIGN.md`. The art is embedded in the binary, and rendering does not call an image generation service at runtime. Final preview cards were visually inspected on Windows and Linux.
+
+All **92 tests**, formatting and strict all-target Clippy passed locally. The new EC2 performed its optimized native build, configuration/schema check and preview rendering successfully. Because the previous build host was unreachable, Rust 1.99.0, rustfmt/Clippy and native build dependencies were installed on the new EC2, using official Rust distribution sources. The running v0.9.2 bot remained up during compilation. A fresh private SQLite backup, prior executable and prior environment are retained. No Git commit or push was performed.
+
+Verified the actual maintenance-to-online sequence: a short-lived systemd helper ran the new binary's `--announce-restart` mode as the restricted elvnx user with the existing protected environment, without opening another Discord gateway. It posted the Restarting image and only the Legacy mention. Then the old bot was stopped, the tested executable installed, and v0.10.0 started. Its startup worker posted Online, durably replaced the tracked pointer and deleted the old bot-owned Restarting message. Discord API verification confirmed old-message 404, exactly one remaining lifecycle image, 1600×720 delivered image dimensions, correct titles, no user/everyone mentions, and the public read-only channel overwrite. Discord exposes the uploaded embed-referenced image in embed.image and can omit it from the top-level attachments array; verification checks the delivered image.
+
+The same service is wired into owner-only `/bot-restart` and graceful SIGINT/SIGTERM shutdown with a 20-second announcement bound. Reconnects within the same process do not announce again. Hard crashes or power loss cannot announce in advance; subsequent successful startup replaces the stale card. Cleanup deletes only persisted, bot-authored message IDs in this guild; failures remain queued for retry. Transaction rollback and queue idempotency are tested. No user-message sweep is performed.
+
+Bot, Lavalink, cipher and tunnel services are active, the new bot reconnected to Lavalink and synchronized the member roster, and presence health returned 200. No playback was active before the service update or initiated by this feature. The existing Music category and website-submission destinations were not changed. See [ONLINE-INFO.md](ONLINE-INFO.md) for operation and failure limits.
+
+---
+
+# Live update — animated favorites receipts
+
+Deployed **0.9.2+build.20261015.150136** to **15.252.100.197** on 15 October 2026. Installed SHA-256: `2004429dbcf24f632a0b9b1fe3dbbef2bf2ffdf99f6f68344888aa025b23f335`.
+
+All **88 tests**, formatting and strict all-target Clippy passed locally. The Linux optimized build, configuration/schema check and image preview rendering passed using the existing cached build workspace; the old bot remained disabled. New tests exercise committed-save receipts, duplicate ownership, full-collection rejection, and storage failure without a success receipt. The executable's transfer hash matched. A fresh private SQLite backup and previous v0.9.1 executable are retained on the new host.
+
+Messages posted to the configured favorites channel now receive custom animated reactions on the original link: check for a newly committed bookmark, repeat for a duplicate, and clock for an unprocessed cooldown submission. Successful/duplicate messages produce no text confirmation or DM. Save failures receive a custom warning plus the existing sanitized error feedback. Reaction failures retain the real storage outcome and fall back to an accurate text response rather than reporting a failed save. The permanent favorites board now explains the receipt icons; Browse/Play interactions remain private.
+
+Verified all four animated application emojis, the updated legend on the same favorites board, and a custom animated check reaction on one existing YouTube message whose normalized URL was already stored. No test bookmark or test message was created, and the saved-link count remained two. A fresh human Message Create submission was not fabricated; the database/receipt behavior was tested locally and Discord's reaction permissions/API were tested live on the existing bookmark. Bot, Lavalink, cipher and tunnel services are active, Lavalink reconnected, presence health is 200, registration remains false, and the existing 100 guild plus two global commands remain without duplicates. No playback was active before restart or initiated by deployment. No Git commit or push was performed.
+
+---
+
+# Discord organization — admin-only Music category
+
+On 15 October 2026, created **Music** (`1560305091884359813`) in ELVNX-PVT and moved existing `music-requests`, `playlist-fav` and `lavlink-status` into it. All three channels use the category's same permission overwrites: @everyone denied View Channel and Connect; existing adminr role explicitly allowed normal channel access; bot member explicitly allowed its required channel access. No role permissions or assignments were changed. Existing Administrator roles (adminr, bot, Avior's Core and official) retain Discord's built-in Administrator access.
+
+Verified each channel's category and exact synced overwrites, denial for a combination of all non-Administrator roles, preserved bot access, original panel/message IDs, and two saved favorites. Saved original category/overwrite records in a root-only backup on the new EC2 instance before mutation. The user explicitly chose to leave pvt-voice unchanged; its category and overwrites were verified unchanged. No bot settings, 24/7 target or database records were modified by the organization script, and no service restart was needed. These documentation changes remain local and uncommitted.
+
+---
+
+# Live update — music fidelity and buffering
+
+Deployed **0.9.1+build.20261015.143704** to **15.252.100.197** on 15 October 2026 at approximately **8:14 PM IST**. Installed SHA-256: `f9e056057375fbd1102ef44f1596e60ab9c5b633eccb177d74770a0182fe8c2e`.
+
+All **86 tests**, strict all-target Clippy, formatting, native configuration/schema and image preview checks passed. Linux compilation used the existing cached build workspace on the old machine; no old bot service was restarted. The tested executable was transferred to the new machine and its SHA-256 matched. A private SQLite backup, prior executable and prior Lavalink YAML are retained on the new host. No Git commit or push was performed.
+
+Lavalink now uses Opus encoder quality 10/10, HIGH resampling, a 5,000 ms audio-frame buffer and explicit seek ghosting. New process defaults use 100% unity gain so compatible Opus tracks can avoid volume-induced transcoding. Existing volume controls remain limited to 0–100%. New join-to-create rooms choose their boost-tier bitrate ceiling instead of fixed 64 kbps; owners retain their audio controls. The active music channel, pvt-voice, was raised from 64 to 96 kbps after inspecting boost tier 0. Its previous bitrate was saved in a root-only rollback record. Other existing voice channels were not bulk edited.
+
+The player was idle before restart. Bot, Lavalink, cipher and tunnel are active afterward, with zero automatic restarts. Discord voice connection returned to the existing configured channel, and the live Lavalink board confirmed 100% volume. Verified active YAML values and YouTube test-stream HTTP 200 with 4,096 bytes read without playing audio in Discord. For the public test video, the existing source served MP4; an explicit Opus-format probe through the TV client returned 400. This is a source availability limit, so no claim of active Opus passthrough, lossless audio, or a guaranteed source bitrate is made. Existing source fallback order and OAuth settings were preserved.
+
+SQLite integrity, consenting-member HTTPS REST, WSS upgrade and PRESENCE_UPDATE, and opted-out 404 behavior passed again. Live audible playback and actual creation of a new temporary voice room were not simulated against members. Source files and documentation were copied to the new build workspace. See [MUSIC-QUALITY.md](MUSIC-QUALITY.md) for supported quality settings and limits.
+
+---
+
+# EC2 migration — 2 vCPU / 4 GB
+
+Migrated on **15 October 2026 at approximately 7:58 PM IST** from `13.203.104.97` to **`15.252.100.197`**, SSH user `ubuntu`, Ubuntu 26.04 LTS x86-64. The installed release remains **0.9.0+build.20261015.141003**, SHA-256 `3551fec6c7c2bd6cb10e9201559a8194201dd8e0e918993427f6890ade6fc9ed`.
+
+Transferred the verified executable, helper scripts, Java 21 runtime configuration, Lavalink and YouTube plugin, Deno 2.9.7 and its cached cipher dependencies, complete bot state and SQLite/WAL files, music configuration, existing YouTube OAuth credentials, and the Cloudflare Tunnel token. Transfer used SSH streams with no local credential archive. Root-only secrets retain mode 600. Application service accounts and hardened systemd units were recreated on the new instance. A fresh old-host SQLite backup was taken before stopping services.
+
+The old bot, Lavalink, cipher and tunnel services are stopped and disabled, each with MainPID 0. Their data and backups remain available for rollback; the old EC2 instance itself has not been stopped or terminated. All four services are active and enabled on the new host, with zero automatic restarts at verification. Automatic Discord command registration remains false and the existing 100 guild plus two global command schema is unchanged.
+
+Verified SQLite integrity, two preserved music favorites, existing board/message IDs and controls, persistent voice connection with self-deafen, an idle Lavalink player, and successful authenticated YouTube test-stream access (HTTP 200, 1,024 bytes read, no audio played in Discord). The saved presence opt-in carried over. Public HTTPS REST returned 200 for the consenting member, WSS returned 101 and a PRESENCE_UPDATE for that same member, and an unknown/opted-out ID returned 404. Activity contents were not printed. The health endpoint returned 200, with no-store headers. The same Cloudflare hostname now reaches the new host; no DNS change was required.
+
+Application ports 4100, 2333 and 8001 remain loopback-only. The new server reported approximately 3 GB available RAM and 16 GB free disk after startup. Committed source was copied separately to `/home/ubuntu/elvnx-build`, excluding local secrets and build artifacts. The local deployment target and this record were updated for the new IP; these migration documentation changes are not committed or pushed.
+
+---
+
 # Live update — opt-in presence API and member URL command
 
 Deployed **0.9.0+build.20261015.141003** on 15 October 2026 at approximately **7:46 PM IST**.

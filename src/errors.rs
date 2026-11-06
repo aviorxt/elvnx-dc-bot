@@ -153,7 +153,7 @@ pub async fn on_error(error: poise::FrameworkError<'_, Data, Error>) {
                 interaction,
                 ..
             } => {
-                let _=interaction.create_response(&framework.serenity_context.http,s::CreateInteractionResponse::Message(s::CreateInteractionResponseMessage::new().ephemeral(true).embed(crate::emoji::embed_for("warning").title("ELVNX / COMMAND UNAVAILABLE").description("This command is outdated or unavailable. Close and reopen Discord's slash-command picker, then try /help. Ask staff to check command synchronization if it continues.").color(0x111111)).allowed_mentions(s::CreateAllowedMentions::new()))).await;
+                let _=interaction.create_response(&framework.serenity_context.http,s::CreateInteractionResponse::Message(s::CreateInteractionResponseMessage::new().ephemeral(true).embed(crate::emoji::embed_for("warning").title("ELVNX / COMMAND UNAVAILABLE").description("This command is outdated or unavailable. Close and reopen Discord's slash-command picker, then try /help. Ask staff to check command synchronization if it continues.").color(crate::theme::ACCENT)).allowed_mentions(s::CreateAllowedMentions::new()))).await;
             }
             F::Setup { error, .. } => tracing::error!(%error,"Bot setup failed"),
             F::EventHandler { error, .. } => tracing::warn!(%error,"Bot event handler failed"),
@@ -188,7 +188,7 @@ pub async fn on_error(error: poise::FrameworkError<'_, Data, Error>) {
                     crate::emoji::embed_for("warning")
                         .title(format!("ELVNX / {command}"))
                         .description(bounded(&body))
-                        .color(0x111111)
+                        .color(crate::theme::ACCENT)
                         .footer(s::CreateEmbedFooter::new(format!(
                             "avrxt.dev • Reference {reference}"
                         ))),

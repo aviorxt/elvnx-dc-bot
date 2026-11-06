@@ -30,7 +30,7 @@ pub fn cover() -> Result<Vec<u8>, Error> {
     )
 }
 fn warning() -> s::CreateEmbed {
-    emoji::embed_for("warning").title(TITLE).color(0x17181c)
+    emoji::embed_for("warning").title(TITLE).color(crate::theme::ACCENT)
         .description(format!("{} **This channel is a honeypot security trap.**\n\nDo not send messages, commands, attachments or test posts here. Use the server's normal chat channels. Posting here can remove your account from the server, including if you are a real person.", emoji::text("warning")))
         .field("What happens?", "The bot attempts a softban: ban, then immediate unban. No historical messages are purged. You will need an invitation to rejoin.", false)
         .field("Made a mistake?", "Contact server staff through a trusted existing contact. A trigger is not proof that you are a spam bot. Never share passwords or login codes.", false)
@@ -281,7 +281,7 @@ async fn alert(ctx: &s::Context, db: &SqlitePool, guild: s::GuildId, text: Strin
                 emoji::embed_for("shield")
                     .title("ELVNX / HONEYPOT REPORT")
                     .description(&text)
-                    .color(0x17181c),
+                    .color(crate::theme::ACCENT),
             )
             .allowed_mentions(s::CreateAllowedMentions::new())
     };

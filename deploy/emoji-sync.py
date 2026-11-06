@@ -14,20 +14,27 @@ for line in Path('/etc/elvnx-bot/bot.env').read_text().splitlines():
         key,value=line.split('=',1);settings[key]=value.strip().strip('"').strip("'")
 def request(path,payload=None):
     body=None if payload is None else json.dumps(payload).encode()
-    for attempt in range(4):
+    for attempt in range(6):
         req=urllib.request.Request('https://discord.com/api/v10/'+path,data=body,headers={'Authorization':'Bot '+settings['DISCORD_TOKEN'],'Content-Type':'application/json','User-Agent':'ELVNX-Emoji-Setup/1.0'})
         try:
             with urllib.request.urlopen(req,timeout=30) as response:return json.load(response)
         except urllib.error.HTTPError as error:
-            if error.code==429 and attempt<3:
-                value=json.loads(error.read());time.sleep(min(float(value.get('retry_after',2)),10));continue
+            if error.code==429 and attempt<5:
+                value=json.loads(error.read());delay=max(1,float(value.get('retry_after',2)))+1
+                if delay>60 and '--wait-rate-limit' not in sys.argv:
+                    raise RuntimeError(f'Discord requested a {delay:.0f}s cooldown; resume with --wait-rate-limit in a background service') from None
+                if delay>7200:raise RuntimeError('Discord cooldown exceeds the two-hour backfill window') from None
+                print(json.dumps({'rate_limited':True,'retry_after_seconds':round(delay)}),flush=True)
+                time.sleep(delay);continue
             raise RuntimeError(f'Discord emoji operation failed with HTTP {error.code}') from None
 app=request('applications/@me')['id']
 existing=request(f'applications/{app}/emojis')['items']
 if '--inspect' in sys.argv:
     print(json.dumps({'application':app,'application_emoji_count':len(existing),'animated_count':sum(bool(e.get('animated')) for e in existing),'elvnx_names':[e['name'] for e in existing if e['name'].startswith('elvnx_')]}));sys.exit(0)
+assets=sorted((root/'assets/emojis').glob('elvnx_v2_*.png'))+sorted((root/'assets/emojis').glob('elvnx_v2_live_*.gif'))
+assert len(assets)==80 and all(p.stat().st_size<=256*1024 for p in assets), 'Validate all 80 assets before uploading'
 manifest={};animated={};created=0
-for path in sorted((root/'assets/emojis').glob('elvnx_*.png'))+sorted((root/'assets/emojis').glob('elvnx_live_*.gif')):
+for path in assets:
     name=path.stem
     found=next((e for e in existing if e['name']==name),None)
     if found is None:
@@ -36,9 +43,24 @@ for path in sorted((root/'assets/emojis').glob('elvnx_*.png'))+sorted((root/'ass
         found=request(f'applications/{app}/emojis',{'name':name,'image':'data:image/'+('gif' if path.suffix=='.gif' else 'png')+';base64,'+base64.b64encode(data).decode()});created+=1
     if path.suffix=='.gif':
         if not found.get('animated'):raise RuntimeError('Expected an animated Discord emoji')
-        animated[name.removeprefix('elvnx_live_')]=int(found['id'])
-    else:manifest[name.removeprefix('elvnx_')]=int(found['id'])
+        animated[name.removeprefix('elvnx_v2_live_')]=int(found['id'])
+    else:manifest[name.removeprefix('elvnx_v2_')]=int(found['id'])
 if len(manifest)!=40 or len(animated)!=40:raise RuntimeError('Expected exactly 40 static and animated local emoji assets')
 (root/'assets/emojis/manifest.json').write_text(json.dumps(manifest,indent=2)+'\n')
 (root/'assets/emojis/animated.json').write_text(json.dumps(animated,indent=2)+'\n')
 print(json.dumps({'application':app,'custom_emoji_count':len(manifest),'animated_count':len(animated),'created':created}))
+
+if '--guild' in sys.argv:
+    guild=settings['DISCORD_GUILD_ID']
+    existing_guild=request(f'guilds/{guild}/emojis')
+    guild_manifest={}
+    guild_created=0
+    for path in assets:
+        found=next((e for e in existing_guild if e['name']==path.stem),None)
+        if found is None:
+            found=request(f'guilds/{guild}/emojis',{'name':path.stem,'image':'data:image/'+('gif' if path.suffix=='.gif' else 'png')+';base64,'+base64.b64encode(path.read_bytes()).decode()})
+            guild_created+=1
+        assert bool(found.get('animated')) == (path.suffix=='.gif')
+        guild_manifest[path.stem]=found['id']
+    (root/'assets/emojis/guild-manifest.json').write_text(json.dumps(guild_manifest,indent=2)+'\n')
+    print(json.dumps({'guild_emoji_count':len(guild_manifest),'guild_created':guild_created}))

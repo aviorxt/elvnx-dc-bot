@@ -194,7 +194,13 @@ mod tests {
             }))
             .unwrap()
         };
-        for mime in ["image/png", "image/svg+xml", "video/mp4", "audio/mpeg"] {
+        for mime in [
+            "image/png",
+            "image/gif",
+            "image/svg+xml",
+            "video/mp4",
+            "audio/mpeg",
+        ] {
             assert!(
                 media_source(&attachment(
                     "https://cdn.discordapp.com/attachments/1/2/media",
@@ -252,6 +258,16 @@ mod tests {
         png.content_type = Some("text/html".into());
         png.filename = "photo.png".into();
         assert!(media_source(&png).is_err());
+        let mut gif = attachment(
+            "https://cdn.discordapp.com/ephemeral-attachments/1/2/ELVNX.GIF?ex=123&hm=abc",
+            "image/gif",
+            MEDIA_LIMIT as u64,
+        );
+        gif.filename = "ELVNX.GIF".into();
+        for mime in [Some("image/gif"), Some("application/octet-stream"), None] {
+            gif.content_type = mime.map(str::to_string);
+            assert!(media_source(&gif).is_ok());
+        }
     }
     #[test]
     fn command_registration_restricts_admin_messaging_and_guild_scope() {
@@ -349,13 +365,13 @@ async fn version(ctx: Context<'_>) -> Result<(), Error> {
     Ok(())
 }
 fn version_embed() -> s::CreateEmbed {
-    crate::emoji::embed().title("ELVNX / VERSION").color(0x111111)
+    crate::emoji::embed().title("ELVNX / VERSION").color(crate::theme::ACCENT)
         .description("avior's Core · Rust Discord bot")
         .field("Version",format!("v{}",env!("CARGO_PKG_VERSION")),true)
         .field("Build number (UTC)",env!("ELVNX_BUILD_NUMBER"),true)
         .field("Release",format!("`{}`",env!("ELVNX_RELEASE")),false)
         .field("Built",format!("<t:{}:F>",env!("ELVNX_BUILD_EPOCH")),false)
-        .field("Recent updates & fixes","Opt-in presence REST API and live WebSocket updates\nSelf-service sharing consent and revocation\nFiltered activity fields with no presence history\nMusic request channel, Add track form and session recaps\nShared playlist favorites and persistent 24/7 voice mode\nPremium Listening Room with progress and queue preview\nSeeking, volume presets and contextual music controls\nVoice room Speak permission inheritance fixed\nPremium voice lounge with 15 owner controls\nExpiring member invitation DMs and guest access\nStructured activity desk and before/after logs\nDiscord audit actors, targets and reasons\nPrivate log enforcement and bounded message cache\nVerification approval DMs and honeypot recovery\n40 animated custom glyph emoji",false)
+        .field("Recent updates & fixes","Owner-bound Personal panels: privacy, guests and channel status\nCrack the Code: higher/lower hints and persistent wins\nWord Chain: alternating turns, persistent scores and leaderboards\nAtomic game state, replay protection and bounded rounds\nUnified violet cards, controls and 80 custom emoji\nPublic online/restart cards with scoped Legacy alerts\nPremium Listening Room and shared playlist favorites\nHigh-quality Opus playback and persistent 24/7 mode\nOpt-in presence REST API and live updates\nVoice lounge with owner controls and invitation DMs\nStructured private logs and verification approval DMs",false)
         .field("Developer","[avrxt.dev](https://www.avrxt.dev)",false)
         .footer(s::CreateEmbedFooter::new("Developed and maintained by avrxt.dev • ELVNX / 11X"))
 }
@@ -1437,7 +1453,7 @@ pub(crate) async fn download_media(file: &s::Attachment) -> Result<(String, Vec<
     };
     Ok((filename, bytes))
 }
-/// Upload an image, video, or audio file to a selected channel using the bot.
+/// Upload an image (including animated GIF or SVG), video, or audio using the bot.
 #[poise::command(
     slash_command,
     guild_only,
@@ -1449,7 +1465,8 @@ pub(crate) async fn download_media(file: &s::Attachment) -> Result<(String, Vec<
 async fn send_attachment(
     ctx: Context<'_>,
     #[description = "Destination text channel"] channel: s::GuildChannel,
-    #[description = "Image, video, or audio attachment, up to 8 MiB"] file: s::Attachment,
+    #[description = "Image (animated GIF/SVG supported), video or audio; up to 8 MiB"]
+    file: s::Attachment,
     #[description = "Optional caption, up to 2000 characters"] caption: Option<String>,
 ) -> Result<(), Error> {
     ctx.defer_ephemeral().await?;
@@ -1521,7 +1538,7 @@ fn outgoing_message(message: String, embed: bool) -> Result<s::CreateMessage, Er
             crate::emoji::embed()
                 .title("ELVNX / MESSAGE")
                 .description(message)
-                .color(0x111111)
+                .color(crate::theme::ACCENT)
                 .footer(s::CreateEmbedFooter::new("11X • private collective")),
         )
     } else {
@@ -1645,6 +1662,16 @@ async fn bot_restart(
         "Owner requested a supervised restart",
     )
     .await?;
+    match tokio::time::timeout(
+        std::time::Duration::from_secs(20),
+        ctx.data().online_info.restarting(ctx.http()),
+    )
+    .await
+    {
+        Ok(Ok(())) => {}
+        Ok(Err(error)) => tracing::warn!(%error, "Owner restart notice failed"),
+        Err(_) => tracing::warn!("Owner restart notice timed out"),
+    }
     ctx.data().db.close().await;
     std::process::exit(75)
 }

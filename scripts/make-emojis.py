@@ -1,4 +1,4 @@
-"""Render ELVNX's code-native monochrome UI icon set (Pillow, no network)."""
+"""Render ELVNX's code-native Violet v2 angular UI icon set (Pillow, no network)."""
 from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont
 
@@ -11,21 +11,30 @@ NAMES = ['brand', 'check', 'cross', 'warning', 'play', 'pause', 'next', 'stop',
 EXTRA_NAMES=['sparkle','equalizer','loading','mail','heart','wave','headphones','microphone','calendar','trophy','rocket','typing','download','upload','search','settings']
 NAMES += EXTRA_NAMES
 S = 4
+def badge():
+    image=Image.new('RGBA',(128*S,128*S))
+    d=ImageDraw.Draw(image)
+    points=[(7,26),(26,7),(102,7),(121,26),(121,102),(102,121),(26,121),(7,102),(7,26)]
+    points=[(x*S,y*S) for x,y in points]
+    d.polygon(points,fill='#11081e')
+    d.line(points,fill='#8b35ff',width=3*S,joint='curve')
+    d.line([(28*S,12*S),(55*S,12*S)],fill='#d4bcff',width=3*S)
+    d.line([(74*S,116*S),(100*S,116*S),(116*S,100*S)],fill='#a65cff',width=3*S)
+    return image
+
 def render(name):
-    image = Image.new('RGBA', (128*S, 128*S))
+    image = badge()
     d = ImageDraw.Draw(image)
-    def line(points, width=9, fill='#f5f5f5'):
+    def line(points, width=9, fill='#eadcff'):
         p = [(int(x*S), int(y*S)) for x,y in points]
         d.line(p, fill=fill, width=width*S, joint='curve')
         r=width*S//2
         for x,y in [p[0],p[-1]]: d.ellipse((x-r,y-r,x+r,y+r),fill=fill)
-    def rect(box, radius=8, fill='#f5f5f5'):
+    def rect(box, radius=8, fill='#eadcff'):
         d.rounded_rectangle(tuple(int(v*S) for v in box),radius=radius*S,fill=fill)
-    def circle(box, fill=None, outline='#f5f5f5', width=8):
+    def circle(box, fill=None, outline='#eadcff', width=8):
         d.ellipse(tuple(int(v*S) for v in box),fill=fill,outline=outline,width=width*S)
-    def poly(points,fill='#f5f5f5'): d.polygon([(int(x*S),int(y*S)) for x,y in points],fill=fill)
-    rect((5,5,123,123),26,'#17181c')
-    d.rounded_rectangle((5*S,5*S,123*S,123*S),radius=26*S,outline='#6c6e77',width=2*S)
+    def poly(points,fill='#eadcff'): d.polygon([(int(x*S),int(y*S)) for x,y in points],fill=fill)
     if name=='brand':
         line([(26,47),(35,39),(35,86)],9);line([(46,47),(55,39),(55,86)],9)
         line([(73,42),(98,86)],10);line([(98,42),(68,86)],10)
@@ -55,7 +64,7 @@ def render(name):
     elif name in ('lock','unlock'):
         if name=='lock': line([(44,60),(44,42),(50,31),(64,27),(78,31),(84,42),(84,60)],7)
         else: line([(47,60),(47,42),(55,30),(70,27),(84,32),(90,44)],7)
-        rect((31,57,97,102),10);rect((61,70,67,88),3,'#17181c')
+        rect((31,57,97,102),10);rect((61,70,67,88),3,'#11081e')
     elif name=='plus': line([(32,64),(96,64)],10);line([(64,32),(64,96)],10)
     elif name=='minus': line([(32,64),(96,64)],10)
     elif name=='link':
@@ -63,30 +72,29 @@ def render(name):
         line([(45,53),(28,70),(26,87),(39,101),(57,102),(75,86)],7);line([(46,81),(82,45)],8)
     elif name=='user': circle((47,28,81,62),width=7);line([(30,98),(35,82),(49,73),(79,73),(94,82),(98,98)],8)
     elif name=='clock': circle((28,28,100,100),width=7);line([(64,42),(64,65),(81,76)],7)
-    elif name=='online': circle((37,37,91,91),fill='#f5f5f5',width=0);circle((26,26,102,102),outline='#71747d',width=3)
-    elif name=='offline': circle((37,37,91,91),outline='#a5a7b0',width=8);line([(32,96),(96,32)],6)
+    elif name=='online': circle((37,37,91,91),fill='#eadcff',width=0);circle((26,26,102,102),outline='#a65cff',width=3)
+    elif name=='offline': circle((37,37,91,91),outline='#bd94ff',width=8);line([(32,96),(96,32)],6)
     elif name=='review':
-        rect((37,27,91,101),6);rect((45,35,83,93),3,'#17181c');line([(48,48),(79,48)],5);line([(48,62),(73,62)],5);line([(48,77),(64,77)],5)
+        rect((37,27,91,101),6);rect((45,35,83,93),3,'#11081e');line([(48,48),(79,48)],5);line([(48,62),(73,62)],5);line([(48,77),(64,77)],5)
     return image.resize((128,128),Image.Resampling.LANCZOS)
 
 for name in NAMES:
-    image=render(name); image.save(OUT/f'elvnx_{name}.png',optimize=True)
+    image=render(name); image.save(OUT/f'elvnx_v2_{name}.png',optimize=True)
 sheet=Image.new('RGB',(800,((len(NAMES)+5)//6)*170),'#0b0c0f')
 draw=ImageDraw.Draw(sheet); font=ImageFont.truetype(str(ROOT/'assets/fonts/SpaceGrotesk.ttf'),14)
 for i,name in enumerate(NAMES):
     x=(i%6)*133+2;y=(i//6)*170+5
     sheet.paste(render(name),(x,y),render(name));draw.text((x+2,y+136),name,font=font,fill='#ededf0')
-(ROOT/'previews').mkdir(exist_ok=True);sheet.save(ROOT/'previews/emojis.png')
+(ROOT/'previews').mkdir(exist_ok=True);sheet.save(ROOT/'previews/emojis-violet.png')
 print(f'Rendered {len(NAMES)} custom emoji assets.')
 
 # Actual glyph animations; the badge border remains completely still.
 import math
 
 def motion(name, step):
-    frame=Image.new('RGBA',(128*S,128*S))
+    frame=badge()
     d=ImageDraw.Draw(frame)
-    d.rounded_rectangle((5*S,5*S,123*S,123*S),radius=26*S,fill='#17181c',outline='#6c6e77',width=2*S)
-    ink='#f5f5f5'; phase=step/24; wave=(1-math.cos(phase*2*math.pi))/2
+    ink='#eadcff'; phase=step/24; wave=(1-math.cos(phase*2*math.pi))/2
     def line(points,width=8):
         coords=[(round(x*S),round(y*S)) for x,y in points]
         d.line(coords,fill=ink,width=width*S,joint='curve')
@@ -114,7 +122,7 @@ def motion(name, step):
         d.rounded_rectangle((27*S,49*S,101*S,96*S),radius=5*S,outline=ink,width=6*S)
         top=50-23*wave;poly([(29,50),(64,top),(99,50)])
         d.rectangle((42*S,(55-10*wave)*S,86*S,78*S),fill=ink)
-        d.line((49*S,(61-10*wave)*S,78*S,(61-10*wave)*S),fill='#17181c',width=3*S)
+        d.line((49*S,(61-10*wave)*S,78*S,(61-10*wave)*S),fill='#11081e',width=3*S)
         line([(29,52),(64,78),(99,52)],5)
     elif name=='heart':
         points=[];scale=1.5+.25*wave
@@ -143,7 +151,7 @@ def motion(name, step):
     elif name=='rocket':
         dy=-6*wave;poly([(64,24+dy),(79,45+dy),(79,82+dy),(49,82+dy),(49,45+dy)])
         poly([(49,64+dy),(36,89+dy),(49,84+dy)]);poly([(79,64+dy),(92,89+dy),(79,84+dy)])
-        d.ellipse((57*S,(49+dy)*S,71*S,(63+dy)*S),fill='#17181c')
+        d.ellipse((57*S,(49+dy)*S,71*S,(63+dy)*S),fill='#11081e')
         poly([(54,89+dy),(64,102+5*math.sin(phase*4*math.pi)),(74,89+dy)])
     elif name in ('download','upload'):
         offset=9*math.sin(phase*2*math.pi);direction=1 if name=='download' else -1
@@ -157,7 +165,7 @@ def motion(name, step):
         points=[]
         for n in range(48):
             a=n*math.pi/24+phase*2*math.pi;radius=33 if n%4 in (0,1) else 26;points.append((64+radius*math.cos(a),64+radius*math.sin(a)))
-        poly(points);d.ellipse((52*S,52*S,76*S,76*S),fill='#17181c')
+        poly(points);d.ellipse((52*S,52*S,76*S,76*S),fill='#11081e')
     elif name=='sparkle':
         for i,(x,y) in enumerate(((51,54),(86,38),(84,87))):
             radius=7+(8 if i==0 else 3)*(.5+.5*math.sin(phase*2*math.pi+i*1.7))
@@ -193,7 +201,7 @@ def motion(name, step):
         d.arc((44*S,(24-gap)*S,84*S,(76-gap)*S),180,360,fill=ink,width=8*S)
         line([(44,49-gap),(44,61)],8)
         line([(84,49-gap),(84,61-gap)],8)
-        d.ellipse((60*S,72*S,69*S,81*S),fill='#17181c');d.rectangle((62*S,78*S,67*S,88*S),fill='#17181c')
+        d.ellipse((60*S,72*S,69*S,81*S),fill='#11081e');d.rectangle((62*S,78*S,67*S,88*S),fill='#11081e')
     elif name=='shield':
         stroke([(64,24),(96,37),(91,75),(78,96),(64,105),(50,96),(37,75),(32,37),(64,24)],1,6)
         stroke([(47,64),(59,77),(81,49)],draw_progress,8)
@@ -211,7 +219,7 @@ def motion(name, step):
         if name=='offline':stroke([(34,94),(94,34)],draw_progress,7)
     elif name=='warning':
         poly([(64,24),(104,100),(24,100)]);poly_ink=ink
-        d.polygon([(64*S,42*S),(88*S,90*S),(40*S,90*S)],fill='#17181c')
+        d.polygon([(64*S,42*S),(88*S,90*S),(40*S,90*S)],fill='#11081e')
         offset=4*math.sin(phase*2*math.pi);line([(64,58+offset),(64,74+offset)],6);ellipse((61,83,67,89),2,ink)
     elif name in ('plus','minus'):
         length=14+36*wave;line([(64-length/2,64),(64+length/2,64)],10)
@@ -240,21 +248,24 @@ def motion(name, step):
     return frame.resize((128,128),Image.Resampling.LANCZOS)
 
 for name in EXTRA_NAMES:
-    motion(name,12).save(OUT/f'elvnx_{name}.png',optimize=True)
+    motion(name,12).save(OUT/f'elvnx_v2_{name}.png',optimize=True)
 for name in NAMES:
+    rgba_frames=[motion(name,step) for step in range(24)]
+    # One shared RGB palette preserves violet hues and avoids per-frame flicker.
+    atlas=Image.new('RGB',(128*6,128*4),'#11081e')
+    for i,frame in enumerate(rgba_frames):atlas.paste(frame.convert('RGB'),((i%6)*128,(i//6)*128))
+    reference=atlas.quantize(colors=255,method=Image.Quantize.MEDIANCUT)
     frames=[]
-    for step in range(24):
-        frame=motion(name,step)
-        reference=Image.new('P',(1,1));reference.putpalette([v for i in range(256) for v in (i,i,i)])
+    for frame in rgba_frames:
         palette=frame.convert('RGB').quantize(palette=reference,dither=Image.Dither.NONE)
         palette.paste(255,mask=frame.getchannel('A').point(lambda a:255 if a<128 else 0))
         palette.info['transparency']=255
         frames.append(palette)
-    frames[0].save(OUT/f'elvnx_live_{name}.gif',save_all=True,append_images=frames[1:],duration=80,loop=0,transparency=255,disposal=2,optimize=False)
-    assert (OUT/f'elvnx_live_{name}.gif').stat().st_size<256*1024
+    frames[0].save(OUT/f'elvnx_v2_live_{name}.gif',save_all=True,append_images=frames[1:],duration=80,loop=0,transparency=255,disposal=2,optimize=False)
+    assert (OUT/f'elvnx_v2_live_{name}.gif').stat().st_size<256*1024
 print(f'Rendered {len(NAMES)} animated glyphs with stationary badges.')
 
 sheet=Image.new('RGB',(1064,((len(NAMES)+7)//8)*170),'#0b0c0f');draw=ImageDraw.Draw(sheet);font=ImageFont.truetype(str(ROOT/'assets/fonts/SpaceGrotesk.ttf'),14)
 for i,name in enumerate(NAMES):
-    im=Image.open(OUT/f'elvnx_{name}.png').convert('RGBA');x=i%8*133+2;y=i//8*170+5;sheet.paste(im,(x,y),im);draw.text((x+2,y+136),name,font=font,fill='#ededed')
-sheet.save(ROOT/'previews/emojis.png')
+    im=Image.open(OUT/f'elvnx_v2_{name}.png').convert('RGBA');x=i%8*133+2;y=i//8*170+5;sheet.paste(im,(x,y),im);draw.text((x+2,y+136),name,font=font,fill='#ededed')
+sheet.save(ROOT/'previews/emojis-violet.png')

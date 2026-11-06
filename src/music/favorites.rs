@@ -88,6 +88,52 @@ async fn save(
         ))
     }
 }
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Receipt {
+    Saved,
+    AlreadySaved,
+    Throttled,
+}
+impl Receipt {
+    fn emoji(self) -> &'static str {
+        match self {
+            Self::Saved => "check",
+            Self::AlreadySaved => "repeat",
+            Self::Throttled => "clock",
+        }
+    }
+    fn fallback(self) -> &'static str {
+        match self {
+            Self::Saved => {
+                "Saved to shared favorites. Use Play favorites or /playlist favorites to play it later."
+            }
+            Self::AlreadySaved => {
+                "This link is already in shared favorites. No duplicate was added."
+            }
+            Self::Throttled => {
+                "Wait five seconds before submitting another link. This message was not saved; try it again after the cooldown."
+            }
+        }
+    }
+}
+async fn save_receipt(
+    db: &sqlx::SqlitePool,
+    guild: s::GuildId,
+    user: s::UserId,
+    url: &str,
+) -> Result<Receipt, Error> {
+    // A success receipt exists only after the database operation succeeds.
+    Ok(if save(db, guild, user, url).await? {
+        Receipt::Saved
+    } else {
+        Receipt::AlreadySaved
+    })
+}
+async fn react_receipt(ctx: &s::Context, m: &s::Message, receipt: Receipt) -> Result<(), Error> {
+    m.react(&ctx.http, crate::emoji::reaction(receipt.emoji())?)
+        .await?;
+    Ok(())
+}
 pub(super) async fn action(
     ctx: &s::Context,
     node: &Service,
@@ -196,16 +242,54 @@ pub(super) async fn message(ctx: &s::Context, data: &Data, node: &Service, m: &s
     {
         return;
     }
-    let result:Result<String,Error>=async{
-        if !requests::limit(&node.db,node.guild,m.author.id,"favorite",s::Timestamp::now().unix_timestamp(),5).await?{return Ok(String::new());}
-        if m.mention_everyone||!m.mentions.is_empty()||!m.mention_roles.is_empty()||!m.attachments.is_empty(){return Err(crate::errors::user("Post one supported music link without mentions or attachments."));}
-        access(ctx,node,m.author.id).await?;let url=link(&m.content)?;
-        Ok(if save(&node.db,node.guild,m.author.id,&url).await?{"Saved to shared favorites. Use the Play favorites button or /playlist favorites to play it later."}else{"This link is already in shared favorites."}.into())
-    }.await;
+    let result: Result<Receipt, Error> = async {
+        if !requests::limit(
+            &node.db,
+            node.guild,
+            m.author.id,
+            "favorite",
+            s::Timestamp::now().unix_timestamp(),
+            5,
+        )
+        .await?
+        {
+            return Ok(Receipt::Throttled);
+        }
+        if m.mention_everyone
+            || !m.mentions.is_empty()
+            || !m.mention_roles.is_empty()
+            || !m.attachments.is_empty()
+        {
+            return Err(crate::errors::user(
+                "Post one supported music link without mentions or attachments.",
+            ));
+        }
+        access(ctx, node, m.author.id).await?;
+        let url = link(&m.content)?;
+        save_receipt(&node.db, node.guild, m.author.id, &url).await
+    }
+    .await;
     let text = match result {
-        Ok(s) if s.is_empty() => return,
-        Ok(s) => s,
-        Err(e) => crate::errors::with_reference(e.as_ref(), "play", m.id.get()),
+        Ok(receipt) => {
+            match react_receipt(ctx, m, receipt).await {
+                Ok(()) => return,
+                Err(error) => {
+                    tracing::warn!(%error, message_id = %m.id, "Favorite receipt reaction failed; sending accurate text fallback")
+                }
+            }
+            format!(
+                "{}\n\nI couldn't add the custom reaction. Staff should check the bot's reaction permissions and custom emoji setup.",
+                receipt.fallback()
+            )
+        }
+        Err(error) => {
+            if let Ok(emoji) = crate::emoji::reaction("warning")
+                && let Err(reaction_error) = m.react(&ctx.http, emoji).await
+            {
+                tracing::warn!(%reaction_error, message_id = %m.id, "Favorite error reaction failed");
+            }
+            crate::errors::with_reference(error.as_ref(), "play", m.id.get())
+        }
     };
     let _ = m
         .channel_id
@@ -241,7 +325,7 @@ pub(super) async fn refresh(ctx: &s::Context, data: &Data) -> Result<(), Error> 
         .bind(data.guild.to_string())
         .fetch_optional(&data.db)
         .await?;
-    let embed=crate::emoji::embed_for("heart").title("ELVNX / PLAYLIST FAVORITES").description("**Save it now. Play it together later.**\n\nPost one supported HTTPS music link here to add it to the server's shared favorites. Saving a link does not start playback, and does not require joining voice.\n\nJoin voice and choose **Play favorites** to queue the first page (up to ten tracks), or use `/playlist favorites` to browse and play other pages. Links remain saved after playback.\n\n200 saved links maximum · duplicates ignored · five seconds between submissions.");
+    let embed=crate::emoji::embed_for("heart").title("ELVNX / PLAYLIST FAVORITES").description(format!("**Save it now. Play it together later.**\n\nPost one supported HTTPS music link here to add it to the server's shared favorites. Saving a link does not start playback, and does not require joining voice.\n\nJoin voice and choose **Play favorites** to queue the first page (up to ten tracks), or use `/playlist favorites` to browse and play other pages. Links remain saved after playback.\n\n200 saved links maximum · duplicates ignored · five seconds between submissions.\n\n**Link receipts**\n{} Saved · {} Already saved · {} Wait five seconds and retry · {} Not saved; see the error reply.", crate::emoji::text("check"), crate::emoji::text("repeat"), crate::emoji::text("clock"), crate::emoji::text("warning")));
     let cover = crate::cards::render(
         "MUSIC / SAVED ROTATION",
         "Keep the good ones.",
@@ -345,6 +429,53 @@ mod tests {
         assert_eq!(
             link("https://youtu.be/abc?si=tracking&utm_source=foo").unwrap(),
             "https://youtu.be/abc"
+        );
+    }
+    #[tokio::test]
+    async fn receipts_follow_committed_favorites_and_do_not_confirm_storage_failure() {
+        let db = crate::store::connect("sqlite::memory:").await.unwrap();
+        let guild = s::GuildId::new(1);
+        let user = s::UserId::new(2);
+        let url = "https://youtu.be/receipt-test";
+        let first = save_receipt(&db, guild, user, url).await.unwrap();
+        assert_eq!(first, Receipt::Saved);
+        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM music_favorites")
+            .fetch_one(&db)
+            .await
+            .unwrap();
+        assert_eq!(count, 1);
+        let duplicate = save_receipt(&db, guild, s::UserId::new(3), url)
+            .await
+            .unwrap();
+        assert_eq!(duplicate, Receipt::AlreadySaved);
+        let saved_emoji = crate::emoji::reaction(first.emoji()).unwrap();
+        let duplicate_emoji = crate::emoji::reaction(duplicate.emoji()).unwrap();
+        assert!(matches!(saved_emoji, s::ReactionType::Custom { .. }));
+        assert_ne!(saved_emoji, duplicate_emoji);
+        assert_ne!(Receipt::Throttled.emoji(), Receipt::Saved.emoji());
+        db.close().await;
+        assert!(save_receipt(&db, guild, user, url).await.is_err());
+    }
+    #[tokio::test]
+    async fn a_full_collection_cannot_produce_a_saved_receipt() {
+        let db = crate::store::connect("sqlite::memory:").await.unwrap();
+        let guild = s::GuildId::new(1);
+        let user = s::UserId::new(2);
+        for i in 0..200 {
+            save_receipt(&db, guild, user, &format!("https://youtu.be/{i}"))
+                .await
+                .unwrap();
+        }
+        assert_eq!(
+            save_receipt(&db, guild, user, "https://youtu.be/0")
+                .await
+                .unwrap(),
+            Receipt::AlreadySaved
+        );
+        assert!(
+            save_receipt(&db, guild, user, "https://youtu.be/overflow")
+                .await
+                .is_err()
         );
     }
     #[tokio::test]

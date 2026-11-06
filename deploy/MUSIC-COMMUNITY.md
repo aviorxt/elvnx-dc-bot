@@ -1,3 +1,12 @@
+> Current channel organization (15 October 2026): `music-requests`, `playlist-fav`
+> and `lavlink-status` are in the admin-only **Music** category
+> (`1560305091884359813`). Everyone is denied View Channel/Connect; adminr and
+> the bot retain explicit access, and existing Discord Administrator roles
+> retain their inherent access. Channel and message IDs were preserved.
+> `pvt-voice` and its permissions were left unchanged at the owner's request.
+> The Legacy/Kona provisioning script documents the original one-time setup;
+> do not rerun it to reorganize the live server or change its voice target.
+
 # Community music — v0.8.0
 
 The approved channels #music-requests and #playlist-fav are under Legacy and copy the category permission overwrites, with five-second slowmode. Kona is the approved persistent voice destination. Request/favorites boards use bot-owned message bindings, illustrated monochrome covers and custom animated controls; they edit in place after restart. Configuration and channel ownership are rechecked. Non-404 board lookup failures do not create duplicate boards.
@@ -8,7 +17,7 @@ Post one song title or supported HTTPS music link in #music-requests, or choose 
 
 ## Shared favorites
 
-Posting one supported HTTPS music link in #playlist-fav saves it without starting playback or requiring voice. Tracking parameters/fragments are stripped; normalized URLs are capped at 300 encoded characters, deduplicated within the guild and limited to 200 saved links. Five-second submission throttling and channel access checks apply. Links are bookmarks and are not guaranteed playable by their source.
+Posting one supported HTTPS music link in #playlist-fav saves it without starting playback or requiring voice. Tracking parameters/fragments are stripped; normalized URLs are capped at 300 encoded characters, deduplicated within the guild and limited to 200 saved links. Five-second submission throttling and channel access checks apply. Saved links receive the animated custom check reaction on the original message; duplicates receive the custom repeat reaction, and cooldown submissions receive the custom clock (retry after five seconds). Success/duplicate submissions produce no text reply or DM. Failed saves receive a custom warning and a sanitized error reply. If a reaction fails, a matching text fallback reports the actual saved/duplicate/cooldown outcome without rolling back a committed bookmark. Browse/Play interactions remain private. The permanent board explains these receipts. Links are bookmarks and are not guaranteed playable by their source.
 
 `/playlist favorites action:View page:1` browses ten links per page. Play queues up to ten supported tracks from that page, subject to available queue space and current voice permissions. Failed source lookups may be skipped; a total loading timeout queues nothing. Links remain saved after playback. Remove requires the saved link and allows the original submitter or Manage Server staff. Board buttons browse/play the first page; other pages use the command. No saved links were injected by deployment.
 

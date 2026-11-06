@@ -1,0 +1,11 @@
+# Crack the Code / Guess Number
+
+The dedicated guess-number channel under Games inherits Legacy access. `guess_game_channel` and `guess_game_panel` bind it by ID; Message Content Intent must remain enabled. There is no extra slash command or external API.
+
+Players send whole numbers from 1–1000. Every valid miss narrows the shared range and gives a higher/lower hint. A correct guess earns one win, reveals the solved number, then starts a fresh random round. Per-player valid guesses have a persistent five-second cooldown. Invalid entries, attachments, stickers and mentions are rejected without resetting state. No wagers, prizes or monetary mechanics exist.
+
+`!score`, `!leaderboard`, `!rules` and staff-only `!reset` work within this channel. Reset requires current Manage Server permission or guild ownership and keeps scores. Commands and invalid-guess feedback use the existing per-channel/player 12-second response limiter; feedback rows expire after one day. Outgoing messages suppress mentions and use custom violet emoji and the shared card renderer.
+
+SQLite immediate transactions atomically update bounds, attempts, scores, target rollover and message watermark. Replayed accepted Discord deliveries cannot score again. A random target remains server-only in the protected database and persists across restarts. Startup seeding never overwrites existing progress. Scores retain user IDs, win totals, valid-guess totals and last valid-guess timestamps until removed by staff; no previous guess text or message contents are retained in game tables. General Discord logs follow their separate server policy. The game does not depend on activity-tracking consent or erase those separate records.
+
+Rules panels are refreshed in place on startup, with a new panel only for a confirmed missing-message response. Automod evaluates messages before gameplay. Tests cover boundaries and malformed numbers, narrowed-range rejection, cooldowns, replay, atomic concurrent duplicate delivery, correct scoring, random target bounds, restart preservation and per-channel isolation. Live validation checks the delivered panel, range and permissions without reading or printing the hidden target or fabricating member activity.

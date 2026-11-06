@@ -94,7 +94,7 @@ impl Service {
                         crate::emoji::embed()
                             .title("ELVNX / STICKY")
                             .description(item.content)
-                            .color(0x111111)
+                            .color(crate::theme::ACCENT)
                             .footer(s::CreateEmbedFooter::new("11X • always in view")),
                     )
                     .allowed_mentions(s::CreateAllowedMentions::new()),

@@ -669,7 +669,7 @@ impl Service {
                     .await
                 {
                     Ok(message) if message.author.id == self.ctx.cache.current_user().id => {
-                        channel.id.edit_message(&self.ctx.http,message.id,s::EditMessage::new().embed(crate::emoji::embed_for("user").title("ELVNX / AVAILABILITY PROTECTED").description("Member lists hidden because this channel's audience permissions changed. Restore the configured private audience to resume.").color(0x111111)).attachments(s::EditAttachments::new()).allowed_mentions(s::CreateAllowedMentions::new())).await?;
+                        channel.id.edit_message(&self.ctx.http,message.id,s::EditMessage::new().embed(crate::emoji::embed_for("user").title("ELVNX / AVAILABILITY PROTECTED").description("Member lists hidden because this channel's audience permissions changed. Restore the configured private audience to resume.").color(crate::theme::ACCENT)).attachments(s::EditAttachments::new()).allowed_mentions(s::CreateAllowedMentions::new())).await?;
                     }
                     Err(s::Error::Http(e))
                         if e.status_code().is_some_and(|s| s.as_u16() == 404) => {}
@@ -768,7 +768,7 @@ impl Service {
         let mut ids = Vec::new();
         for (page, body) in text.iter().enumerate() {
             let title = format!("ELVNX / {label} · {}", page + 1);
-            let mut embed=crate::emoji::embed_for("user").title(&title).description(body).color(0x111111).timestamp(s::Timestamp::now()).footer(s::CreateEmbedFooter::new("11X / live availability · invisible appears Offline · stale timestamp means the updater may be offline"));
+            let mut embed=crate::emoji::embed_for("user").title(&title).description(body).color(crate::theme::ACCENT).timestamp(s::Timestamp::now()).footer(s::CreateEmbedFooter::new("11X / live availability · invisible appears Offline · stale timestamp means the updater may be offline"));
             if cfg.enabled && snapshot.ready {
                 for (group, label) in ["● ONLINE", "○ OFFLINE", "◇ GAMING", "↗ ON VC"]
                     .into_iter()

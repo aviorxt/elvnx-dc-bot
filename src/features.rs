@@ -88,7 +88,7 @@ fn embed(title: &str, text: impl Into<String>) -> s::CreateEmbed {
     crate::emoji::named(title)
         .title(format!("ELVNX / {title}"))
         .description(text)
-        .color(0x111111)
+        .color(crate::theme::ACCENT)
 }
 async fn member_permissions(
     ctx: &s::Context,

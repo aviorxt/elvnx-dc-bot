@@ -1,4 +1,4 @@
-//! Self-service, opt-in live presence. Activity payloads never enter SQLite.
+//! Live presence for current server members. Activity payloads never enter SQLite.
 use crate::{Context, Error, reply, serenity as s};
 use axum::{
     Json, Router,
@@ -19,14 +19,10 @@ use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
-use tokio::sync::{Mutex, RwLock, Semaphore};
+use tokio::sync::{Mutex, Semaphore};
 
 pub struct Service {
-    db: SqlitePool,
-    guild: s::GuildId,
     availability: Arc<crate::availability::Service>,
-    // This lock also orders revocations against reads and live publications.
-    consent: RwLock<std::collections::HashSet<u64>>,
     limits: Mutex<HashMap<IpAddr, (Instant, u32)>>,
     sockets: Arc<Semaphore>,
     listener_enabled: bool,
@@ -110,21 +106,13 @@ fn project(user: &s::User, presence: Option<&s::Presence>) -> Value {
 }
 impl Service {
     pub async fn start(
-        db: SqlitePool,
-        guild: s::GuildId,
+        _db: SqlitePool,
+        _guild: s::GuildId,
         availability: Arc<crate::availability::Service>,
     ) -> Result<Arc<Self>, Error> {
         let enabled = std::env::var("PRESENCE_API_ENABLED").as_deref() == Ok("true");
-        let users: Vec<String> =
-            sqlx::query_scalar("SELECT user FROM presence_consent WHERE guild=?")
-                .bind(guild.to_string())
-                .fetch_all(&db)
-                .await?;
         let service = Arc::new(Self {
-            db,
-            guild,
             availability,
-            consent: RwLock::new(users.iter().filter_map(|v| valid_id(v)).collect()),
             limits: Mutex::new(HashMap::new()),
             sockets: Arc::new(Semaphore::new(64)),
             listener_enabled: enabled,
@@ -158,52 +146,15 @@ impl Service {
                     tracing::error!(%error,"Presence API stopped");
                 }
             });
-            tracing::info!(port, "Opt-in presence API listening on loopback only");
+            tracing::info!(port, "Server member presence API listening on loopback only");
         }
         Ok(service)
     }
     async fn snapshot(&self, id: u64) -> Result<Value, StatusCode> {
-        let consent = self.consent.read().await;
-        if !consent.contains(&id) {
-            return Err(StatusCode::NOT_FOUND);
-        }
         let (user, presence) = self.availability.api_snapshot(s::UserId::new(id)).await?;
         Ok(project(&user, presence.as_ref()))
     }
-    async fn set_consent(&self, id: u64, enabled: bool) -> Result<(), Error> {
-        update_consent(&self.db, self.guild, &self.consent, id, enabled).await
-    }
-    pub async fn observe(&self, event: &s::FullEvent) {
-        if let s::FullEvent::GuildMemberRemoval { guild_id, user, .. } = event
-            && *guild_id == self.guild
-            && let Err(error) = self.set_consent(user.id.get(), false).await
-        {
-            tracing::error!(%error,"Presence consent removal failed; sharing revoked for this process");
-        }
-    }
-}
-async fn update_consent(
-    db: &SqlitePool,
-    guild: s::GuildId,
-    lock: &RwLock<std::collections::HashSet<u64>>,
-    id: u64,
-    enabled: bool,
-) -> Result<(), Error> {
-    let mut consent = lock.write().await;
-    if enabled {
-        sqlx::query("INSERT INTO presence_consent(guild,user,created) VALUES(?,?,?) ON CONFLICT(guild,user) DO NOTHING")
-                .bind(guild.to_string()).bind(id.to_string()).bind(chrono::Utc::now().timestamp()).execute(db).await?;
-        consent.insert(id);
-    } else {
-        // Revoke in memory first, even if SQLite is temporarily unavailable.
-        consent.remove(&id);
-        sqlx::query("DELETE FROM presence_consent WHERE guild=? AND user=?")
-            .bind(guild.to_string())
-            .bind(id.to_string())
-            .execute(db)
-            .await?;
-    }
-    Ok(())
+    pub async fn observe(&self, _event: &s::FullEvent) {}
 }
 async fn guard(
     State(service): State<Arc<Service>>,
@@ -293,13 +244,6 @@ async fn stream(mut socket: WebSocket, service: Arc<Service>, id: u64) {
         tokio::select! {
             _=timer.tick()=>{
                 if started.elapsed()>Duration::from_secs(3600) {break;}
-                // Hold consent lock through bounded send, so Disable cannot finish
-                // while an older activity publication is still in flight.
-                let consent=service.consent.read().await;
-                if !consent.contains(&id) {
-                    let _=tokio::time::timeout(Duration::from_secs(3),socket.send(Message::Text(json!({"event":"REVOKED"}).to_string().into()))).await;
-                    break;
-                }
                 let data=service.availability.api_snapshot(s::UserId::new(id)).await;
                 let (event,payload)=match data {
                     Ok((user,presence))=>("PRESENCE_UPDATE",json!({"success":true,"data":project(&user,presence.as_ref())})),
@@ -324,66 +268,27 @@ async fn stream(mut socket: WebSocket, service: Arc<Service>, id: u64) {
 #[derive(Debug, Clone, Copy, poise::ChoiceParameter)]
 pub enum Action {
     Url,
-    Enable,
-    Disable,
     Info,
 }
-/// Get an opted-in member’s presence URL, or manage your own public sharing.
+/// Get a server member's live presence URL. Sharing is automatic.
 #[poise::command(slash_command, guild_only)]
 pub async fn presence(
     ctx: Context<'_>,
-    #[description = "Member whose public URL to show; defaults to yourself"] member: Option<
-        s::User,
-    >,
-    #[description = "Defaults to Url; sharing settings apply only to yourself"] action: Option<
-        Action,
-    >,
-    #[description = "Required for Enable: publicly share your profile, devices, status and activity details"]
-    confirm: Option<bool>,
+    #[description = "Member whose public URL to show; defaults to yourself"] member: Option<s::User>,
+    #[description = "Defaults to Url"] action: Option<Action>,
 ) -> Result<(), Error> {
     let service = &ctx.data().presence;
-    let id = ctx.author().id.get();
-    let action = action.unwrap_or(Action::Url);
-    if member.is_some() && !matches!(action, Action::Url) {
-        return reply(ctx, "The member selector is only for viewing public URLs. Omit member when enabling, disabling or inspecting your own sharing settings.").await;
+    if matches!(action, Some(Action::Info)) {
+        return reply(ctx, "Presence is automatic for current server members; no enable command is needed. The API shares Discord-visible profile, status, devices and activities. Invisible appears offline. Discord privacy settings still apply. Activity stays in memory; no presence history is stored.").await;
     }
-    match action {
-        Action::Url => {
-            let target = member.as_ref().map_or(ctx.author(), |user| user);
-            if !service.listener_enabled {
-                return reply(
-                    ctx,
-                    "The presence API is currently unavailable. Try again later.",
-                )
-                .await;
-            }
-            // Use the same consent and membership checks as the public API.
-            match service.snapshot(target.id.get()).await {
-                Ok(_) => reply(ctx, format!("**Public presence URL**\nhttps://presence.11x.dpdns.org/v1/users/{}\n**Live updates**\n`wss://presence.11x.dpdns.org/v1/users/{}/ws`", target.id, target.id)).await,
-                Err(StatusCode::NOT_FOUND) if target.id == ctx.author().id => reply(ctx, "Your presence is private. Use `/presence action:Enable` to review what public sharing exposes before opting in.").await,
-                Err(StatusCode::NOT_FOUND) => reply(ctx, "No public presence is available for that member. They must opt in themselves; you cannot enable sharing for someone else.").await,
-                Err(_) => reply(ctx, "Presence is still synchronizing. Try again shortly.").await,
-            }
-        }
-        Action::Enable => {
-            if confirm != Some(true) {
-                return reply(ctx,"**Public sharing requires your consent.** Anyone who knows your Discord ID may read your profile/avatar, online status, active devices and activity details (including games, Spotify and custom status). Activity text can include filenames or other information you put in Rich Presence. No voice channels, email, messages, session secrets or presence history are published. Invisible appears offline. Websites can copy published data; revocation cannot erase their copies. Run `/presence action:Enable confirm:true` to opt in for yourself.").await;
-            }
-            if !service.listener_enabled {
-                return reply(ctx,"The presence API is not enabled on this bot. No sharing consent was saved. Ask the owner to configure its private listener and HTTPS proxy first.").await;
-            }
-            service.availability.api_snapshot(ctx.author().id).await.map_err(|_|crate::errors::user("Presence is still synchronizing or your membership is unavailable. Try again shortly."))?;
-            service.set_consent(id, true).await?;
-            reply(ctx,format!("Public presence sharing enabled for **your account only**. API: `https://presence.11x.dpdns.org/v1/users/{id}` · live: `wss://presence.11x.dpdns.org/v1/users/{id}/ws`. Use `/presence action:Disable` to revoke sharing. Activity stays in memory; only your consent is saved.")).await
-        }
-        Action::Disable => {
-            service.set_consent(id, false).await?;
-            reply(ctx,"Presence API sharing revoked. New reads return not found and live streams close on their next check (within about two seconds). Existing third-party copies cannot be recalled.").await
-        }
-        Action::Info => {
-            let enabled = service.consent.read().await.contains(&id);
-            reply(ctx,format!("Your public sharing: **{}**. API listener: **{}**. Only self-service opt-in is supported. No member list or presence history is exposed. `/presence action:Disable` revokes sharing.",if enabled{"Enabled"}else{"Disabled"},if service.listener_enabled{"Enabled"}else{"Disabled"})).await
-        }
+    if !service.listener_enabled {
+        return reply(ctx, "The presence API is currently unavailable. Try again later.").await;
+    }
+    let target = member.as_ref().unwrap_or_else(|| ctx.author());
+    match service.snapshot(target.id.get()).await {
+        Ok(_) => reply(ctx, format!("**Public presence URL**\nhttps://presence.11-x.online/v1/users/{}\n**Live updates**\n`wss://presence.11-x.online/v1/users/{}/ws`", target.id, target.id)).await,
+        Err(StatusCode::NOT_FOUND) => reply(ctx, "Presence is available only for current non-bot server members.").await,
+        Err(_) => reply(ctx, "Presence is still synchronizing. Try again shortly.").await,
     }
 }
 
@@ -428,69 +333,5 @@ mod tests {
         assert_eq!(public["discord_status"], "offline");
         assert_eq!(public["activities"], json!([]));
         assert_eq!(public["active_on_discord_desktop"], false);
-    }
-    #[tokio::test]
-    async fn consent_changes_are_scoped_and_revocation_fails_closed() {
-        let db = crate::store::connect("sqlite::memory:").await.unwrap();
-        let lock = RwLock::new(std::collections::HashSet::new());
-        update_consent(&db, s::GuildId::new(1), &lock, 2, true)
-            .await
-            .unwrap();
-        update_consent(&db, s::GuildId::new(1), &lock, 2, true)
-            .await
-            .unwrap();
-        assert!(lock.read().await.contains(&2));
-        let count: i64 = sqlx::query_scalar("SELECT count(*) FROM presence_consent")
-            .fetch_one(&db)
-            .await
-            .unwrap();
-        assert_eq!(count, 1);
-        update_consent(&db, s::GuildId::new(3), &lock, 2, true)
-            .await
-            .unwrap();
-        update_consent(&db, s::GuildId::new(1), &lock, 2, false)
-            .await
-            .unwrap();
-        assert!(!lock.read().await.contains(&2));
-        let rows: Vec<String> = sqlx::query_scalar("SELECT guild FROM presence_consent")
-            .fetch_all(&db)
-            .await
-            .unwrap();
-        assert_eq!(rows, vec!["3"]);
-        lock.write().await.insert(2);
-        db.close().await;
-        assert!(
-            update_consent(&db, s::GuildId::new(1), &lock, 2, false)
-                .await
-                .is_err()
-        );
-        assert!(!lock.read().await.contains(&2));
-        assert!(
-            update_consent(&db, s::GuildId::new(1), &lock, 2, true)
-                .await
-                .is_err()
-        );
-        assert!(!lock.read().await.contains(&2));
-    }
-    #[tokio::test]
-    async fn consent_schema_stores_only_user_choice_not_activity() {
-        let db = crate::store::connect("sqlite::memory:").await.unwrap();
-        sqlx::query("INSERT INTO presence_consent VALUES('1','2',0)")
-            .execute(&db)
-            .await
-            .unwrap();
-        let consent: Vec<String> =
-            sqlx::query_scalar("SELECT user FROM presence_consent WHERE guild='1'")
-                .fetch_all(&db)
-                .await
-                .unwrap();
-        assert_eq!(consent, vec!["2"]);
-        // Schema deliberately has no activity payload column.
-        let columns: Vec<String> =
-            sqlx::query_scalar("SELECT name FROM pragma_table_info('presence_consent')")
-                .fetch_all(&db)
-                .await
-                .unwrap();
-        assert_eq!(columns, vec!["guild", "user", "created"]);
     }
 }

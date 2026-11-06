@@ -1,0 +1,9 @@
+# ELVNX status artwork
+
+Background asset: `elvnx-purple-status-background.png`.
+Generation mode: built-in image_gen, using the owner-provided screenshot as a style reference.
+Final production cards are rendered locally by Rust at 1600×720, with Barlow Condensed ExtraBold Italic (SIL OFL, license included), Space Grotesk and IBM Plex Mono. Dynamic status, IST timestamp and release number are added in code; no generation API is used at runtime. The reference's WARX branding was not incorporated.
+
+## Final generation prompt
+
+Use case: stylized-concept. Create an original ELVNX / 11X Discord bot status banner BACKGROUND, using the attached Discord screenshot only as a reference for its purple-black cinematic gaming aesthetic, angular luminous frame, smoky futuristic skyline, metallic texture and dramatic contrast. This is a production background for dynamic text rendered later by code. Wide landscape composition, about 1600 by 720. Rich near-black base, electric violet #8b35ff and lavender edge highlights, subtle distressed metal, violet smoke and light streaks, angular beveled sci-fi perimeter frame. A dark futuristic hooded/armored silhouette on the far right, inspired by the anonymous figure at the edge of the reference, atmospheric and secondary. Keep the central-left 70% very dark, clean and LOW DETAIL so huge two-line status typography remains highly readable. Do not paint any words, letters, numbers, logos, status text, timestamps, UI, Discord interface or badges. No WARX branding. No guns or weapons. The image should look like premium custom esports community artwork rather than a generic neon wallpaper. Full-bleed finished flat banner, not a mockup or photograph of a screen. Preserve a quiet top-center area for ELVNX branding and bottom edge for metadata. Avoid busy geometric noise in the text safe area.

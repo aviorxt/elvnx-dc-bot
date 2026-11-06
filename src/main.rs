@@ -12,18 +12,23 @@ mod eventlog;
 mod events;
 mod extras;
 mod features;
+mod guess_game;
 mod honeypot;
 mod legacy;
 mod live_status;
 mod music;
+mod online_info;
+mod personal;
 mod presence;
 mod rules;
 mod security;
 mod sticky;
 mod store;
+mod theme;
 mod toolbox;
 mod verification;
 mod voice_rooms;
+mod word_chain;
 
 use poise::serenity_prelude as serenity;
 use sqlx::SqlitePool;
@@ -52,6 +57,7 @@ struct Data {
     live_status: Arc<live_status::Service>,
     availability: Arc<availability::Service>,
     presence: Arc<presence::Service>,
+    online_info: Arc<online_info::Service>,
 }
 
 async fn reply(ctx: Context<'_>, text: impl Into<String>) -> Result<(), Error> {
@@ -61,7 +67,7 @@ async fn reply(ctx: Context<'_>, text: impl Into<String>) -> Result<(), Error> {
                 crate::emoji::embed_for(crate::emoji::command_icon(&ctx.command().name))
                     .title("ELVNX / 11X")
                     .description(text.into())
-                    .color(0x111111)
+                    .color(crate::theme::ACCENT)
                     .footer(serenity::CreateEmbedFooter::new(
                         "avrxt.dev • private collective",
                     )),
@@ -88,7 +94,7 @@ async fn log(http: &serenity::Http, data: &Data, text: String) {
         let embed = crate::emoji::embed_for("review")
             .title("ELVNX / MODERATION CASE")
             .description(text)
-            .color(0x111111)
+            .color(crate::theme::ACCENT)
             .timestamp(serenity::Timestamp::now());
         if let Err(error) = serenity::ChannelId::new(channel)
             .send_message(
@@ -156,7 +162,24 @@ async fn main() -> Result<(), Error> {
     let db = store::connect(&url).await?;
     if std::env::args().any(|a| a == "--preview") {
         std::fs::create_dir_all("previews")?;
+        std::fs::write("previews/elvnx-violet-icon.png", cards::brand_icon()?)?;
         std::fs::write("previews/voice-lounge.png", voice_rooms::cover()?)?;
+        std::fs::write(
+            "previews/elvnx-online.png",
+            online_info::render_card(
+                online_info::Phase::Online,
+                chrono::Utc::now(),
+                env!("ELVNX_RELEASE"),
+            )?,
+        )?;
+        std::fs::write(
+            "previews/elvnx-restarting.png",
+            online_info::render_card(
+                online_info::Phase::Restarting,
+                chrono::Utc::now(),
+                env!("ELVNX_RELEASE"),
+            )?,
+        )?;
         std::fs::write("previews/activity-desk.png", eventlog::cover()?)?;
         std::fs::write("previews/listening-room.png", music::preview()?)?;
         std::fs::write("previews/honeypot.png", honeypot::cover()?)?;
@@ -333,6 +356,18 @@ async fn main() -> Result<(), Error> {
             .map_err(|_| crate::errors::user("Set DISCORD_GUILD_ID."))?
             .parse()?,
     );
+    let online_info = online_info::Service::load(db.clone(), guild)?;
+    if std::env::args().any(|arg| arg == "--announce-restart") {
+        let http = serenity::Http::new(&token);
+        tokio::time::timeout(
+            std::time::Duration::from_secs(20),
+            online_info.restarting(&http),
+        )
+        .await
+        .map_err(|_| crate::errors::user("Restart announcement timed out."))??;
+        return Ok(());
+    }
+    let setup_online_info = Arc::clone(&online_info);
     let settings = store::settings(&db, guild.get()).await?;
     let stickies = sticky::Service::load(db.clone(), guild).await?;
     let mut intents = serenity::GatewayIntents::GUILDS
@@ -376,7 +411,8 @@ async fn main() -> Result<(), Error> {
         let live_status = live_status::Service::start(ctx.clone(), db.clone(), guild, Arc::clone(framework.shard_manager()), music.clone(), started).await?;
         let availability=availability::Service::start(ctx.clone(),db.clone(),guild).await?;
         let presence=presence::Service::start(db.clone(),guild,Arc::clone(&availability)).await?;
-        let data=Data {db,guild,settings:RwLock::new(settings),configuration_lock:Arc::new(Mutex::new(())),spam:Mutex::new(HashMap::new()),started,stickies,voices:Arc::new(Mutex::new(HashMap::new())),nuke:Mutex::new(HashMap::new()),rules:RwLock::new(automod::Rules::load()?),event_history:Mutex::new(eventlog::Cache::default()),music,afk,live_status,availability,presence};
+        let data=Data {db,guild,settings:RwLock::new(settings),configuration_lock:Arc::new(Mutex::new(())),spam:Mutex::new(HashMap::new()),started,stickies,voices:Arc::new(Mutex::new(HashMap::new())),nuke:Mutex::new(HashMap::new()),rules:RwLock::new(automod::Rules::load()?),event_history:Mutex::new(eventlog::Cache::default()),music,afk,live_status,availability,presence,online_info:Arc::clone(&setup_online_info)};
+        setup_online_info.start(Arc::clone(&ctx.http));
         extras::presence(ctx,&*data.settings.read().await);
         extras::start_scheduler(ctx.http.clone(),data.db.clone(),guild,data.voices.clone());
         features::start(ctx.clone(),data.db.clone(),guild);
@@ -388,11 +424,38 @@ async fn main() -> Result<(), Error> {
         .framework(framework)
         .await?;
     let manager = Arc::clone(&client.shard_manager);
+    let http = Arc::clone(&client.http);
     tokio::spawn(async move {
-        if tokio::signal::ctrl_c().await.is_ok() {
-            manager.shutdown_all().await;
+        if let Err(error) = shutdown_signal().await {
+            tracing::error!(%error, "Unable to listen for shutdown signals");
+            return;
         }
+        match tokio::time::timeout(
+            std::time::Duration::from_secs(20),
+            online_info.restarting(&http),
+        )
+        .await
+        {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => tracing::warn!(%error, "Controlled shutdown notice failed"),
+            Err(_) => tracing::warn!("Controlled shutdown notice timed out"),
+        }
+        manager.shutdown_all().await;
     });
     client.start().await?;
     Ok(())
+}
+
+async fn shutdown_signal() -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        let mut terminate =
+            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
+        tokio::select! {
+            result = tokio::signal::ctrl_c() => result,
+            _ = terminate.recv() => Ok(()),
+        }
+    }
+    #[cfg(not(unix))]
+    tokio::signal::ctrl_c().await
 }

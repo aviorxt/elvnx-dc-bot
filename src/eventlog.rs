@@ -105,7 +105,7 @@ fn base(title: &str, description: String) -> s::CreateEmbed {
     crate::emoji::embed_for(icon)
         .title(format!("ELVNX / {title}"))
         .description(clip(&description, 1800))
-        .color(0x111111)
+        .color(crate::theme::ACCENT)
         .timestamp(s::Timestamp::now())
         .footer(s::CreateEmbedFooter::new("avrxt.dev • staff activity log"))
 }

@@ -1,0 +1,13 @@
+# Word Chain
+
+The dedicated Word Chain channel lives under Games and inherits the same access policy as Legacy. `word_chain_channel` and `word_chain_panel` in persisted guild settings bind gameplay and the reusable rules panel to channel/message IDs, independent of names. Message Content Intent must remain enabled. No new slash registration is needed.
+
+Start from **violet**, then play a word starting with **t**. Each subsequent word starts with the last letter of the latest accepted word. Entries use 2–24 ASCII English letters, case insensitive, with no attachments, stickers or mentions. This is a chain game, not a dictionary service: spelling and meaningful words are an honour rule. Players alternate; there is a three-second accepted-turn cooldown per player. Wrong entries do not reset the round or lose points.
+
+Accepted words earn one point and a custom check reaction. Errors receive a custom cross and guidance, rate-limited to one feedback message per player per 12 seconds. `!score`, `!leaderboard`, and `!rules` use the same response limit. Manage Server or the guild owner is required for `!reset`, which resets the round but keeps scores. Payloads suppress all mentions, including leaderboard user references.
+
+SQLite immediate transactions serialize turn acceptance. Words, scores and chain progression commit together. Message IDs prevent replay of already processed turns; rejected turns are not stored as accepted. At 500 accepted words, the current-round word set is deleted, the seed returns to violet, and scores persist. Manual reset also advances the message watermark. Used words remain only for the current round; feedback rows expire after one day. Scores and user IDs remain until staff removes the game records. These are separate game scores, not general activity tracking.
+
+The bot uses the central violet card renderer for its rules cover. Startup refreshes the tracked rules message in place; only a confirmed missing-message response creates a replacement. Other Discord errors are logged and do not duplicate the panel. Automod evaluates human messages before Word Chain; deleted violations do not receive game points. No changes are made to the existing counting state, channel IDs, webhooks or member roles.
+
+Tests cover bounded parsing, wrong initial letters, alternating players, reused words, duplicate messages, per-channel isolation, concurrent submissions, score atomicity, cooldowns, feedback throttling and round rollover. The game is seeded without impersonating a member or fabricating live scores. Human multi-member gameplay should be verified by playing naturally in the channel.

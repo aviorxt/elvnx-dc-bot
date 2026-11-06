@@ -14,11 +14,11 @@ fn animated_ids() -> &'static HashMap<String, u64> {
 }
 fn asset(key: &str) -> Option<(u64, bool, String)> {
     if let Some(id) = animated_ids().get(key) {
-        Some((*id, true, format!("elvnx_live_{key}")))
+        Some((*id, true, format!("elvnx_v2_live_{key}")))
     } else {
         ids()
             .get(key)
-            .map(|id| (*id, false, format!("elvnx_{key}")))
+            .map(|id| (*id, false, format!("elvnx_v2_{key}")))
     }
 }
 pub fn text(key: &str) -> String {
@@ -49,6 +49,7 @@ pub fn embed() -> s::CreateEmbed {
 }
 pub fn embed_for(key: &str) -> s::CreateEmbed {
     let embed = s::CreateEmbed::new()
+        .color(crate::theme::ACCENT)
         .footer(s::CreateEmbedFooter::new("ELVNX / 11X • avrxt.dev"))
         .timestamp(s::Timestamp::now());
     match url(key) {
@@ -200,8 +201,8 @@ mod tests {
         assert_eq!(unique.len(), 40);
         assert!(ids().values().all(|id| *id > 0));
         let button = serde_json::to_value(button("elvnx:music:stop").label("Stop")).unwrap();
-        assert_eq!(button["emoji"]["name"], "elvnx_live_stop");
-        assert!(text("check").starts_with("<a:elvnx_live_check:"));
+        assert_eq!(button["emoji"]["name"], "elvnx_v2_live_stop");
+        assert!(text("check").starts_with("<a:elvnx_v2_live_check:"));
         assert_eq!(animated_ids().len(), 40);
         let all: std::collections::HashSet<_> =
             ids().values().chain(animated_ids().values()).collect();

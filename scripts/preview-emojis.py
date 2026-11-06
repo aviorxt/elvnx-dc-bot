@@ -12,12 +12,12 @@ def at_time(im,stamp):
 for i in range(24):
     sheet=Image.new('RGB',(560,648),'#0b0c0f');d=ImageDraw.Draw(sheet)
     for n,name in enumerate(names):
-        im=Image.open(root/f'assets/emojis/elvnx_live_{name}.gif');tile=at_time(im,i*80);x=n%4*140+6;y=n//4*162+2
+        im=Image.open(root/f'assets/emojis/elvnx_v2_live_{name}.gif');tile=at_time(im,i*80);x=n%4*140+6;y=n//4*162+2
         sheet.paste(tile,(x,y),tile);d.text((x+4,y+132),name,font=font,fill='#eeeeee')
     frames.append(sheet)
-frames[0].save(root/'previews/emojis-animated.gif',save_all=True,append_images=frames[1:],duration=80,loop=0)
-frames[6].save(root/'previews/animated-contact.png')
-for path in (root/'assets/emojis').glob('elvnx_live_*.gif'):
+frames[0].save(root/'previews/emojis-violet-animated.gif',save_all=True,append_images=frames[1:],duration=80,loop=0)
+frames[6].save(root/'previews/violet-animated-contact.png')
+for path in (root/'assets/emojis').glob('elvnx_v2_live_*.gif'):
     im=Image.open(path);assert im.n_frames>1 and path.stat().st_size<256*1024
     first=at_time(im,0).convert('RGB');changed=False
     for t in range(80,1920,80):

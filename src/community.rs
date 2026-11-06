@@ -191,7 +191,7 @@ async fn setup_number(
             .bind(ctx.data().guild.to_string())
             .fetch_one(&ctx.data().db)
             .await?;
-        ch.id.send_message(ctx.http(),s::CreateMessage::new().embed(crate::emoji::embed().title("ELVNX / COUNTING GAME").description(format!("Next number: **{}**. Post the next whole number; alternate users. Wrong numbers and non-number posts are deleted. Progress is preserved when toggling the game.", current + 1)).color(0x111111)).allowed_mentions(s::CreateAllowedMentions::new())).await?;
+        ch.id.send_message(ctx.http(),s::CreateMessage::new().embed(crate::emoji::embed().title("ELVNX / COUNTING GAME").description(format!("Next number: **{}**. Post the next whole number; alternate users. Wrong numbers and non-number posts are deleted. Progress is preserved when toggling the game.", current + 1)).color(crate::theme::ACCENT)).allowed_mentions(s::CreateAllowedMentions::new())).await?;
         Some(ch.id.get())
     } else {
         cfg.counting_channel

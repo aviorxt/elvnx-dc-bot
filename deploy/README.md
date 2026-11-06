@@ -1,10 +1,14 @@
 # VPS deployment
 
-Target: Ubuntu on 13.203.104.97, SSH user `ubuntu`. Authentication uses the existing
+See [CURRENT-VM.md](CURRENT-VM.md) for the active Instabox deployment.
+The older Ubuntu provisioning notes below are retained for reference.
+
+Target: Ubuntu 26.04 LTS on 15.252.100.197 (2 vCPU, 4 GB RAM), SSH user `ubuntu`. Authentication uses the existing
 private key outside this project. No key or Discord token belongs in Git.
 
-The standalone bot maintains an outbound Discord gateway connection. It does not
-run a public HTTP server and needs no additional inbound port or domain.
+The standalone bot maintains an outbound Discord gateway connection. Its optional presence API listens only on `127.0.0.1:4100`, published at
+`https://presence.11-x.online` through Cloudflare Tunnel. No inbound application
+port is needed; Lavalink and the YouTube helper also listen only on loopback.
 
 ## Installed layout
 
@@ -24,7 +28,12 @@ SIGINT allows the gateway to close before service shutdown.
 ## Build and install
 
 `bootstrap.sh` installs Ubuntu build dependencies, the official Rust toolchain,
-Noto fallback fonts, and a 2 GB swap file on this 2 GB VPS. It does not modify SSH
+Noto fallback fonts, and a 2 GB swap file when provisioning a build server.
+The 4 GB instance runs without swap and now has Rust 1.99.0, rustfmt, Clippy,
+build-essential and pkg-config installed. Source and native Cargo caches live in
+`/home/ubuntu/elvnx-build`; compilation no longer depends on the old EC2 host.
+The first native dependency build took about twelve minutes with one Cargo job.
+Build tools are not required for normal service operation. It does not modify SSH
 or firewall settings. The source archive excludes `.env`, SQLite, and Windows binaries.
 
 `build.sh` tests, lints, and compiles an optimized Linux binary using the locked
@@ -41,7 +50,10 @@ before setting their environment flags. Set `REGISTER_COMMANDS=true` for the fir
 connection, confirm registration, then turn it off. Invite this bot to ELVNX-PVT
 using `bot` and `applications.commands` scopes and the permissions in the main README.
 
-The local `deploy/start.ps1` performs the preflight, private SSH transfer, startup,
+The local `deploy/start.ps1` is for initial setup and reconstructs the bot
+environment. Do not run it against the migrated instance to restart or update it;
+preserve the complete existing server environment, including presence and music
+settings. For initial setup it performs the preflight, private SSH transfer, startup,
 and command-registration checks without printing the token. Run it only after
 the token is saved and this bot is invited to the configured server.
 
@@ -62,3 +74,5 @@ and copy the database with its WAL/SHM files; copying only a live database file 
 lose recent writes. Do not run multiple copies against the same gateway/database.
 
 Music setup and operation: deploy/MUSIC.md. Daily reports: deploy/DAILY-INSIGHT.md.
+
+Public lifecycle artwork and scoped Legacy notifications: [ONLINE-INFO.md](ONLINE-INFO.md).

@@ -26,7 +26,7 @@ fn embed(title: &str, body: impl Into<String>) -> s::CreateEmbed {
     crate::emoji::named(title)
         .title(format!("ELVNX / {title}"))
         .description(body)
-        .color(0x111111)
+        .color(crate::theme::ACCENT)
         .footer(s::CreateEmbedFooter::new("11X • developed by avrxt.dev"))
 }
 async fn destination(
@@ -1242,6 +1242,9 @@ pub fn start(
             interval.tick().await;
             if let Err(error) = crate::verification::cleanup(&db).await {
                 tracing::warn!(%error,"Verification retention cleanup failed");
+            }
+            if let Err(error) = crate::personal::cleanup(&db).await {
+                tracing::warn!(%error,"Personal form retention cleanup failed");
             }
             let connected = manager
                 .runners

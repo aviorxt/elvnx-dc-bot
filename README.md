@@ -32,7 +32,7 @@ See [FEATURES.md](FEATURES.md) for settings panels, public role panels, polls, r
 
 `/verify` posts a one-time visual challenge and accessible Staff help panel. Fresh account-age, join/rejoin and native membership checks gate the zero-permission whitelist role; flagged accounts require a private staff decision. This is screening, not identity proof or guaranteed alt detection. See deploy/VERIFICATION.md.
 
-`/welcome-setup` saves welcome text and enables custom 850×470 PNG cards with the joining user's Discord avatar, matching the site's black/white palette with hand-drawn borders, stars, arrows, dotted texture, and handwritten accents. Space Grotesk, IBM Plex Mono, and Kalam are bundled under SIL Open Font Licenses so Linux rendering does not depend on installed desktop fonts. Avatar HTTP requests are HTTPS-only, limited to Discord CDN hosts, have redirects disabled, a five-second timeout, and a one-megabyte response cap. SVG user text is escaped before rendering. A missing avatar falls back to the brand layout. `cargo run -- --preview` renders sample cards into previews/ without connecting to Discord; sample totals are illustrative.
+`/welcome-setup` saves welcome text and enables custom 850×470 PNG cards with the joining user's Discord avatar, matching the site's black/white palette with hand-drawn borders, stars, arrows, dotted texture, and handwritten accents. Barlow Condensed ExtraBold Italic, Space Grotesk, and IBM Plex Mono are bundled under SIL Open Font Licenses so Linux rendering does not depend on installed desktop fonts. Avatar HTTP requests are HTTPS-only, limited to Discord CDN hosts, have redirects disabled, a five-second timeout, and a one-megabyte response cap. SVG user text is escaped before rendering. A missing avatar falls back to the brand layout. `cargo run -- --preview` renders sample cards into previews/ without connecting to Discord; sample totals are illustrative.
 
 `/activity enabled:true` opts in to future human message counts and voice-connected duration. `/insight` shows self or a selected user's PNG card with message leaderboard. These totals cover only events the bot can see while online and enabled. Voice time measures connection, not speech; it includes muted/deafened sessions and excludes bots. Voice progress is flushed every 30 seconds; a sudden shutdown can lose the last interval. Existing sessions begin tracking on their next voice-state event. Counts are not automatically imported from history. Disabling tracking stops new counters but does not erase earlier totals; an operator can review retention in SQLite.
 
@@ -96,7 +96,7 @@ Primary references: https://docs.rs/poise/latest/poise/ and https://docs.rs/sere
 
 ## Additional community controls
 
-`/email` lists support@11x.dpdns.org and admin@11x.dpdns.org. `/help page:1` lists every registered command and paginates descriptions. Standard responses, public posts, stickies, and logs use monochrome embeds; insight/welcome cards are dynamically rendered PNGs. Discord controls embed fonts and placement; image cards provide custom typography.
+`/email` lists support@11x.dpdns.org and admin@11x.dpdns.org. `/help page:1` lists every registered command and paginates descriptions. Standard responses, public posts, stickies, and logs use violet embeds; insight/welcome cards are dynamically rendered PNGs. Discord controls embed fonts and placement; image cards provide custom typography.
 
 `/dm-clear confirm:true` deletes up to 100 tracked messages sent through `/dm`, optionally restricted to a member. Repeat for later batches. It cannot delete recipients' messages, incoming DMs, or untracked messages from earlier versions. DM text is never stored. Failed deletions remain tracked for retry.
 
@@ -112,7 +112,7 @@ VPS installation and operation: [deploy/README.md](deploy/README.md). The Linux 
 
 
 
-/daily-insight enabled:true channel:YOUR_CHANNEL posts a doodle report card at 23:50 IST after /activity enabled:true. It uses IST day totals, preserves voice time across midnight, and ranks members by messages then voice time. Reports cover online tracked activity through report time. Daily totals expire after 30 days, and each guild/date is claimed once to avoid duplicate sends. See deploy/DAILY-INSIGHT.md and deploy/MUSIC.md for operation.
+/daily-insight enabled:true channel:YOUR_CHANNEL posts a violet report card at 23:50 IST after /activity enabled:true. It uses IST day totals, preserves voice time across midnight, and ranks members by messages then voice time. Reports cover online tracked activity through report time. Daily totals expire after 30 days, and each guild/date is claimed once to avoid duplicate sends. See deploy/DAILY-INSIGHT.md and deploy/MUSIC.md for operation.
 
 AFK automation: /afk-move enabled:true channel:DND moves human members after 10 continuous minutes muted or deafened. Active status, leaving, or switching channels resets the timer. See deploy/AFK-MOVE.md for permissions and restart behavior.
 
@@ -120,7 +120,7 @@ Role reactions: /always-react channel:YOUR_CHANNEL adds ✅ to new human message
 
 Appukuttan Legacy: /appukuttan-legacy channel:YOUR_CHANNEL posts the exact text ente appukuttan vanneyyyy when user 463980163852664832 joins voice from a disconnected state. Disable with /appukuttan-legacy enabled:false. Moves and mute/deafen changes do not trigger announcements. Settings persist across restarts. No message is sent just by enabling the command, and no user or role is pinged.
 
-Server rules: /rules channel:YOUR_CHANNEL posts one message with a generated 1200x420 ELVNX doodle cover followed by a detailed rules embed. The artwork includes the current server name and IST date, with Space Grotesk, IBM Plex Mono, and Kalam. Eleven sections cover respect, privacy, safety, content, channel use, spam, voice etiquette, sharing, bot tools, reports, and moderation. Manage Server and destination posting access are required; the bot also needs Embed Links and Attach Files. Messages do not ping users or roles. Each invocation creates a new rules post without pinning or replacing old messages. Preview with the executable's --preview option.
+Server rules: /rules channel:YOUR_CHANNEL posts one message with a generated 1200x420 ELVNX violet cover followed by a detailed rules embed. The artwork includes the current server name and IST date, with Barlow Condensed ExtraBold Italic, Space Grotesk, and IBM Plex Mono. Eleven sections cover respect, privacy, safety, content, channel use, spam, voice etiquette, sharing, bot tools, reports, and moderation. Manage Server and destination posting access are required; the bot also needs Embed Links and Attach Files. Messages do not ping users or roles. Each invocation creates a new rules post without pinning or replacing old messages. Preview with the executable's --preview option.
 
 Live status: /bot-status-live creates ELVNX BOT STATUS with elvnx-status and lavlink-status channels. It edits one embed per channel every 30 seconds, with saved IDs for restart recovery. Admins can pause using enabled:false. See deploy/LIVE-STATUS.md for metrics, read-only permissions, and freshness behavior.
 
@@ -153,4 +153,14 @@ Premium music controls and Listening Room design: [deploy/MUSIC-PANEL.md](deploy
 
 Music requests, session recaps, shared favorites and 24/7 voice: [deploy/MUSIC-COMMUNITY.md](deploy/MUSIC-COMMUNITY.md).
 
-Opt-in live presence REST/WebSocket API: [deploy/PRESENCE.md](deploy/PRESENCE.md).
+Automatic server-member live presence REST/WebSocket API: [deploy/PRESENCE.md](deploy/PRESENCE.md).
+
+Music fidelity and buffering: [deploy/MUSIC-QUALITY.md](deploy/MUSIC-QUALITY.md).
+
+Public lifecycle cards and Legacy notices: [deploy/ONLINE-INFO.md](deploy/ONLINE-INFO.md).
+
+Word Chain: the dedicated Games channel supports alternating single-word turns, persistent points, no repeats, custom reactions, !score, !leaderboard and !rules. Staff with Manage Server can use !reset without clearing scores. Each new round starts with violet; play a word beginning with t. A round caps at 500 accepted words. Alphabetic/chain validation is automatic; spelling is a community honour rule. Gameplay runs after automod and keeps the existing counting game unchanged. See [WORD-CHAIN.md](deploy/WORD-CHAIN.md).
+
+Crack the Code: Games/guess-number supports shared higher/lower guesses from 1–1000, a persistent five-second per-player cooldown, automatic new rounds, win leaderboards, !score, !leaderboard, !rules and staff !reset. See [GUESS-NUMBER.md](deploy/GUESS-NUMBER.md).
+
+Personal channels: owner-bound Lock/Unlock, Hide/Unhide, Add/Remove member, and Set/Clear status panels. Private selectors and status forms expire after two minutes, recheck ownership on submit and cannot change another room. Text status appears in the channel topic. Everyone stays denied View Channel. See [PERSONAL-CHANNELS.md](deploy/PERSONAL-CHANNELS.md).

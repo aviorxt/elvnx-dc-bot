@@ -1,5 +1,5 @@
 param(
-    [string]$ServerAddress='13.203.104.97',
+    [string]$ServerAddress='15.252.100.197',
     [string]$SshUser='ubuntu',
     [string]$KeyPath='C:\Users\IRSHAD\Downloads\Others\aws-legion-ssh.pem'
 )

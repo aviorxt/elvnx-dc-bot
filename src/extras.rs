@@ -664,7 +664,7 @@ pub async fn gateway(ctx: &s::Context, event: &s::FullEvent, data: &Data) -> Res
                                     crate::emoji::embed()
                                         .title("ELVNX / SAFETY ALERT")
                                         .description(reason)
-                                        .color(0x111111),
+                                        .color(crate::theme::ACCENT),
                                 )
                                 .allowed_mentions(s::CreateAllowedMentions::new()),
                         )
@@ -725,7 +725,7 @@ async fn tick(
                         .footer(s::CreateEmbedFooter::new(
                             "08:00 IST • original community quote",
                         ))
-                        .color(0x111111),
+                        .color(crate::theme::ACCENT),
                 )
                 .allowed_mentions(s::CreateAllowedMentions::new());
             let outcome = s::ChannelId::new(channel).send_message(http, message).await;

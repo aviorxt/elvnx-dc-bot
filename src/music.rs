@@ -79,7 +79,8 @@ impl Default for State {
             current: None,
             queue: VecDeque::new(),
             paused: false,
-            volume: 50,
+            // Unity gain preserves compatible source Opus packets without re-encoding.
+            volume: 100,
             position: 0,
             voice_session: None,
             voice_token: None,
@@ -256,7 +257,7 @@ impl Service {
         let started = Instant::now();
         let mut embed = crate::emoji::embed_for("headphones")
             .title("ELVNX / LAVALINK STATUS")
-            .color(0x111111)
+            .color(crate::theme::ACCENT)
             .timestamp(s::Timestamp::now())
             .footer(s::CreateEmbedFooter::new(
                 "30s refresh • stale timestamp may mean bot/updater is offline",
@@ -264,7 +265,7 @@ impl Service {
         let stats = match self.request(reqwest::Method::GET, "/v4/stats", None).await {
             Ok(stats) => stats,
             Err(_) => {
-                return embed.color(0xbb3333).description(format!(
+                return embed.color(crate::theme::ERROR).description(format!(
                     "{} Audio node unavailable. The bot will reconnect automatically.",
                     crate::emoji::text("offline")
                 ));
@@ -974,7 +975,7 @@ fn player_embed(state: &State, listeners: usize) -> s::CreateEmbed {
     let mut embed = crate::emoji::embed_for(if state.paused { "pause" } else { "headphones" })
         .title("ELVNX / LISTENING ROOM")
         .description(format!("**{}**\n{}", safe(title, 160), safe(artist, 120)))
-        .color(0x111111)
+        .color(crate::theme::ACCENT)
         .image("attachment://listening-room.png")
         .field(
             "Playback",
@@ -2149,7 +2150,7 @@ pub async fn gateway(ctx: &s::Context, event: &s::FullEvent, data: &Data) {
                             crate::emoji::embed_for("headphones")
                                 .title("ELVNX / MUSIC")
                                 .description(text)
-                                .color(0x111111),
+                                .color(crate::theme::ACCENT),
                         )
                         .allowed_mentions(s::CreateAllowedMentions::new()),
                 )

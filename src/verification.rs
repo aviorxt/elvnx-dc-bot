@@ -43,7 +43,7 @@ fn embed(title: &str, text: impl Into<String>) -> s::CreateEmbed {
     emoji::embed_for("shield")
         .title(format!("ELVNX / {title}"))
         .description(text)
-        .color(0x111111)
+        .color(crate::theme::ACCENT)
         .footer(s::CreateEmbedFooter::new(
             "11X • account screening, not proof of identity",
         ))
@@ -1054,7 +1054,7 @@ mod tests {
             json["components"][0]["components"][0]["url"],
             "https://discord.com/channels/1"
         );
-        assert!(json.to_string().contains("elvnx_live_check"));
+        assert!(json.to_string().contains("elvnx_v2_live_check"));
         assert!(!json.to_string().contains("Staff decision"));
     }
     #[test]

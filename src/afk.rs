@@ -242,7 +242,7 @@ impl Service {
                     self.tracker.lock().await.members.remove(&user);
                     let cfg = store::settings(db, guild.get()).await?;
                     if let Some(log) = cfg.log_channel {
-                        let _ = s::ChannelId::new(log).send_message(&ctx.http, s::CreateMessage::new().embed(crate::emoji::embed().title("ELVNX / AFK MOVE").description(format!("<@{user}> moved from <#{}> to <#{destination}> after 10 continuous minutes muted or deafened.", original.channel)).color(0x111111)).allowed_mentions(s::CreateAllowedMentions::new())).await;
+                        let _ = s::ChannelId::new(log).send_message(&ctx.http, s::CreateMessage::new().embed(crate::emoji::embed().title("ELVNX / AFK MOVE").description(format!("<@{user}> moved from <#{}> to <#{destination}> after 10 continuous minutes muted or deafened.", original.channel)).color(crate::theme::ACCENT)).allowed_mentions(s::CreateAllowedMentions::new())).await;
                     }
                 }
                 Err(error) => {

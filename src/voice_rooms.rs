@@ -4,6 +4,14 @@ use sqlx::{Row, SqlitePool};
 use std::time::Duration;
 
 const TITLE: &str = "ELVNX / VOICE LOUNGE";
+fn max_bitrate(tier: s::PremiumTier) -> u32 {
+    match tier {
+        s::PremiumTier::Tier1 => 128000,
+        s::PremiumTier::Tier2 => 256000,
+        s::PremiumTier::Tier3 => 384000,
+        _ => 96000,
+    }
+}
 fn now() -> i64 {
     s::Timestamp::now().unix_timestamp()
 }
@@ -650,13 +658,14 @@ async fn create(
             | s::Permissions::MANAGE_ROLES,
         s::Permissions::empty(),
     );
+    let guild_info = data.guild.to_partial_guild(&ctx.http).await?;
     let mut builder = s::CreateChannel::new(format!(
         "{}'s room",
         member.user.name.chars().take(40).collect::<String>()
     ))
     .kind(s::ChannelType::Voice)
     .permissions(base.clone())
-    .bitrate(64000);
+    .bitrate(max_bitrate(guild_info.premium_tier));
     if let Some(parent) = hub.parent_id {
         builder = builder.category(parent);
     }
@@ -1213,12 +1222,7 @@ async fn action(
         }
         "settings" => {
             let guild = data.guild.to_partial_guild(&ctx.http).await?;
-            let max = match guild.premium_tier {
-                s::PremiumTier::Tier1 => 128000,
-                s::PremiumTier::Tier2 => 256000,
-                s::PremiumTier::Tier3 => 384000,
-                _ => 96000,
-            };
+            let max = max_bitrate(guild.premium_tier);
             let options = [64000, 96000, 128000, 256000, 384000]
                 .into_iter()
                 .filter(|n| *n <= max)
@@ -1239,12 +1243,7 @@ async fn action(
                 .filter(|n| [64000, 96000, 128000, 256000, 384000].contains(n))
                 .ok_or_else(|| crate::errors::user("Invalid bitrate selection."))?;
             let g = data.guild.to_partial_guild(&ctx.http).await?;
-            let max = match g.premium_tier {
-                s::PremiumTier::Tier1 => 128000,
-                s::PremiumTier::Tier2 => 256000,
-                s::PremiumTier::Tier3 => 384000,
-                _ => 96000,
-            };
+            let max = max_bitrate(g.premium_tier);
             if rate > max {
                 return Err(crate::errors::user(
                     "The server no longer supports this bitrate. Open Audio settings again.",

@@ -62,11 +62,23 @@ pub async fn handle(
     }
     crate::music::gateway(ctx, event, data).await;
     crate::eventlog::handle(ctx, event, data).await;
+    if crate::personal::gateway(ctx, event, data).await? {
+        return Ok(());
+    }
     if crate::voice_rooms::gateway(ctx, event, data).await? {
         return Ok(());
     }
 
     if matches!(event, s::FullEvent::Ready { .. }) {
+        if let Err(error) = crate::personal::refresh_all(ctx, data).await {
+            tracing::warn!(%error, "Personal channel panels could not all refresh");
+        }
+        if let Err(error) = crate::guess_game::refresh(ctx, data).await {
+            tracing::warn!(%error, "Guess Number panel refresh failed");
+        }
+        if let Err(error) = crate::word_chain::refresh(ctx, data).await {
+            tracing::warn!(%error, "Word Chain panel refresh failed");
+        }
         if let Err(error) = crate::verification::refresh_panel(ctx, data).await {
             tracing::warn!(%error,"Verification panel styling refresh failed");
         }
@@ -176,7 +188,14 @@ pub async fn handle(
                     )
                     .await?;
                     log(&ctx.http,data,format!("Case #{id} • automod • {reason}\nMember: {}\nChannel: {}\nMessage content not retained.",message.author.id,message.channel_id)).await;
+                    return Ok(());
                 }
+            }
+            if let Err(error) = crate::word_chain::message(ctx, data, message).await {
+                tracing::warn!(%error, "Word Chain processing failed");
+            }
+            if let Err(error) = crate::guess_game::message(ctx, data, message).await {
+                tracing::warn!(%error, "Guess Number processing failed");
             }
             data.stickies
                 .queue(ctx.http.clone(), message.channel_id)
@@ -216,7 +235,7 @@ pub async fn handle(
                             crate::emoji::embed()
                                 .title("ELVNX / WELCOME")
                                 .description(text)
-                                .color(0x111111),
+                                .color(crate::theme::ACCENT),
                         )
                         .allowed_mentions(s::CreateAllowedMentions::new());
                     if cfg.welcome_images {
