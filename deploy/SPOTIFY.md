@@ -1,5 +1,37 @@
 # Spotify links and YouTube playlists
 
+## Current deployment: direct official Spotify playback
+
+`SPOTIFY_DIRECT_ENABLED=true` now routes Spotify links to the signed-in official
+Linux Spotify client. It does not search YouTube for these requests. Public embed
+metadata supplies track IDs and queue information. The custom `spotifydirect`
+Lavalink source routes the official client's PulseAudio monitor through a private
+loopback PCM bridge into Lavalink's Opus encoder. No Spotify audio keys are
+extracted or implemented by the bot. The unofficial go-librespot receiver is stopped.
+
+Sources and build helper are in [spotify-direct](spotify-direct). The helper expects
+Lavalink dependencies extracted under `/data/workspace/spotify-plugin/deps`:
+`jar xf /opt/lavalink/Lavalink.jar BOOT-INF/lib`. Copy the Java source and Python
+bridge to `/data/workspace` before building. The plugin JAR is installed under
+`/var/lib/lavalink/plugins`. User services `elvnx-spotify-desktop` and
+`elvnx-spotify-bridge` start with the VM's user session. PulseAudio's persistent
+`elvnx_spotify` null sink receives only the Spotify client's output. The official
+client needs the VM's graphical desktop and its saved Spotify sign-in.
+
+The bridge listens only on `127.0.0.1:3680`, uses the user's local MPRIS session,
+and streams 48 kHz stereo signed 16-bit PCM. Each playback has a unique session
+ID so an old stop cannot terminate a newer track. Stop and skip release the capture
+process; pause/resume control both Spotify and Lavalink. Seeking is disabled for
+direct Spotify tracks. Public albums/playlists retain the 50-track queue limit.
+Spotify account credentials and desktop profiles are never committed.
+
+Actual official-client audio and 150 encoded Opus frames were verified without
+joining a Discord voice channel. Discord still uses its server bitrate ceiling.
+Source quality depends on the official client's audio quality setting and plan.
+Set `SPOTIFY_DIRECT_ENABLED=false` and restart the bot to restore YouTube matching.
+
+## Matching mode (direct flag disabled)
+
 `/play query:LINK` accepts public Spotify track, album and playlist links, including
 localized `open.spotify.com/intl-.../` links and `spotify:track:ID` URIs. It also
 accepts YouTube playlist links. A YouTube video link containing a `list` parameter

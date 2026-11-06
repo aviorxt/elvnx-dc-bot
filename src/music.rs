@@ -369,6 +369,13 @@ impl Service {
         embed
     }
     async fn patch(&self, payload: Value) -> Result<(), Error> {
+        if let Some(paused)=payload.get("paused").and_then(Value::as_bool) {
+            let direct=self.state.lock().await.current.as_ref().and_then(|r|r.track.info.uri.as_deref()).is_some_and(|u|u.starts_with("https://open.spotify.com/track/"));
+            if direct {
+                reqwest::Client::new().post(if paused {"http://127.0.0.1:3680/pause"} else {"http://127.0.0.1:3680/resume"})
+                    .timeout(Duration::from_secs(10)).send().await?.error_for_status()?;
+            }
+        }
         let session =
             self.session.lock().await.clone().ok_or_else(|| {
                 crate::errors::user("Audio node is reconnecting; try again shortly")

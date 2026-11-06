@@ -5,6 +5,7 @@ use futures_util::stream::{self, StreamExt};
 
 #[derive(Clone, Debug)]
 struct Metadata {
+    id: String,
     title: String,
     artist: String,
     duration: u64,
@@ -30,7 +31,7 @@ fn parse_metadata(html: &str) -> Result<Vec<Metadata>, Error> {
         let artist = artists.as_deref().filter(|v| !v.is_empty()).or_else(||v["subtitle"].as_str())?;
         let duration = v["duration"].as_u64()?;
         if title.is_empty() || artist.is_empty() || duration == 0 { return None; }
-        Some(Metadata { title: title.chars().take(180).collect(), artist: artist.chars().take(120).collect(), duration })
+        Some(Metadata { id: v["uri"].as_str().and_then(|v|v.strip_prefix("spotify:track:")).unwrap_or_default().to_string(), title: title.chars().take(180).collect(), artist: artist.chars().take(120).collect(), duration })
     }).collect();
     if tracks.is_empty() {
         return Err(crate::errors::user("No public Spotify tracks were found. Private playlists and podcast links are not supported."));
@@ -75,6 +76,18 @@ fn best_match(tracks: Vec<Track>, expected: &Metadata) -> Option<Track> {
 
 pub(super) async fn load(node: &Service, identifier: &str) -> Result<Vec<Track>, Error> {
     let tracks = metadata(identifier).await?;
+    if std::env::var("SPOTIFY_DIRECT_ENABLED").as_deref() == Ok("true") {
+        use base64::Engine as _;
+        let mut direct = Vec::new();
+        for track in tracks {
+            if track.id.len()!=22 || !track.id.bytes().all(|b|b.is_ascii_alphanumeric()) { continue; }
+            let payload=json!({"id":track.id,"title":track.title,"artist":track.artist,"duration":track.duration}).to_string();
+            let query=format!("spdirect:{}",base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(payload));
+            direct.extend(parse_tracks(node.load_identifier(&query).await?)?);
+        }
+        if direct.is_empty(){return Err(crate::errors::user("No direct Spotify tracks are available for this link"));}
+        return Ok(direct);
+    }
     let total = tracks.len();
     let results = stream::iter(tracks.into_iter().map(|track| async move {
         let query = format!("ytsearch:{} {}",track.artist,track.title);
@@ -109,7 +122,7 @@ mod tests {
     }
     #[test]
     fn matching_rejects_live_wrong_artists_and_wrong_durations() {
-        let expected=Metadata{title:"Test Song".into(),artist:"Test Artist".into(),duration:200000};
+        let expected=Metadata{id:String::new(),title:"Test Song".into(),artist:"Test Artist".into(),duration:200000};
         let make=|title:&str,author:&str,length:u64,live:bool|Track{encoded:"test".into(),info:Info{title:title.into(),author:author.into(),length,is_stream:live,is_seekable:true,uri:None}};
         assert!(best_match(vec![make("Test Song","Test Artist",200000,false)],&expected).is_some());
         assert!(best_match(vec![make("Test Song","Other Performer",200000,false)],&expected).is_none());
