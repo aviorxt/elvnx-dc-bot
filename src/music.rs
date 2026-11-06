@@ -369,7 +369,7 @@ impl Service {
         embed
     }
     async fn patch(&self, payload: Value) -> Result<(), Error> {
-        if let Some(paused)=payload.get("paused").and_then(Value::as_bool) {
+        if let Some(paused)=native_pause_action(&payload) {
             let direct=self.state.lock().await.current.as_ref().and_then(|r|r.track.info.uri.as_deref()).is_some_and(|u|u.starts_with("https://open.spotify.com/track/"));
             if direct {
                 reqwest::Client::new().post(if paused {"http://127.0.0.1:3680/pause"} else {"http://127.0.0.1:3680/resume"})
@@ -829,6 +829,12 @@ impl Service {
 pub enum Source {
     Soundcloud,
     YouTube,
+}
+fn native_pause_action(payload: &Value) -> Option<bool> {
+    // Track starts/replacements already own the state mutex. The bridge starts
+    // the native track itself; only standalone pause/resume updates belong here.
+    if payload.get("track").is_some() { return None; }
+    payload.get("paused").and_then(Value::as_bool)
 }
 fn music_bitrate(tier: s::PremiumTier) -> u32 {
     match tier {
@@ -2471,6 +2477,14 @@ mod tests {
         for query in ["https://open.spotify.com.evil.org/track/4cOdK2wGLETKBW3PvgPWqT", "https://user:pass@open.spotify.com/track/4cOdK2wGLETKBW3PvgPWqT", "https://open.spotify.com/episode/4cOdK2wGLETKBW3PvgPWqT", "https://open.spotify.com/track/short", "https://evil.open.spotify.com/track/4cOdK2wGLETKBW3PvgPWqT", "spotify:track:bad:extra"] {
             assert!(identifier(query, Source::YouTube).is_err(), "{query}");
         }
+    }
+    #[test]
+    fn track_start_does_not_enter_native_pause_state_lock() {
+        assert_eq!(native_pause_action(&json!({"track":{"encoded":"spotify"},"paused":false})),None);
+        assert_eq!(native_pause_action(&json!({"track":{"encoded":null}})),None);
+        assert_eq!(native_pause_action(&json!({"paused":true})),Some(true));
+        assert_eq!(native_pause_action(&json!({"paused":false})),Some(false));
+        assert_eq!(native_pause_action(&json!({"volume":100})),None);
     }
     #[test]
     fn music_quality_uses_supported_discord_bitrate_ceiling() {
