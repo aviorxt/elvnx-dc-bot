@@ -354,6 +354,7 @@ impl Service {
                 true,
             );
         if let Some(request) = state.current {
+            embed = embed.field("Audio source", audio_source(&request.track.info), true);
             embed = embed.field(
                 if state.paused {
                     "Paused"
@@ -666,9 +667,10 @@ impl Service {
                 }
             })
             .unwrap_or(0.0);
+        let source_artist=state.current.as_ref().map(|r|format!("{} · {}",artist,audio_source(&r.track.info))).unwrap_or_else(||artist.to_string());
         let png = crate::cards::music(&crate::cards::MusicCard {
             title,
-            artist,
+            artist: &source_artist,
             status,
             elapsed: &elapsed,
             duration: &duration,
@@ -940,6 +942,16 @@ fn repeat_label(mode: RepeatMode) -> &'static str {
         RepeatMode::Queue => "Queue",
     }
 }
+fn audio_source(info: &Info) -> &'static str {
+    let Some(url)=info.uri.as_deref().and_then(|uri|reqwest::Url::parse(uri).ok()) else { return "Unknown"; };
+    let host=url.host_str().unwrap_or_default();
+    if host=="open.spotify.com" { "Spotify" }
+    else if host=="youtu.be" || host=="youtube.com" || host.ends_with(".youtube.com") { "YouTube" }
+    else if host=="soundcloud.com" || host.ends_with(".soundcloud.com") { "SoundCloud" }
+    else if host=="bandcamp.com" || host.ends_with(".bandcamp.com") { "Bandcamp" }
+    else if host=="twitch.tv" || host.ends_with(".twitch.tv") { "Twitch" }
+    else { "Other" }
+}
 fn track_duration(info: &Info) -> String {
     if info.is_stream {
         "LIVE".into()
@@ -1033,6 +1045,7 @@ fn player_embed(state: &State, listeners: usize) -> s::CreateEmbed {
     let mut embed = crate::emoji::embed_for(if state.paused { "pause" } else { "headphones" })
         .title("ELVNX / LISTENING ROOM")
         .description(format!("**{}**\n{}", safe(title, 160), safe(artist, 120)))
+        .field("Audio source", current.map(|r|audio_source(&r.track.info)).unwrap_or("—"), true)
         .color(crate::theme::ACCENT)
         .image("attachment://listening-room.png")
         .field(
